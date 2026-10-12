@@ -1,0 +1,5 @@
+# Normalize line endings on checkout/commit so Windows and POSIX contributors
+# produce identical diffs.
+* text=auto eol=lf
+*.png binary
+*.pdf binary

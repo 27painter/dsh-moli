@@ -1,0 +1,7 @@
+node_modules/
+*.log
+*.tmp
+# Local artifacts produced while testing the tools
+*.png
+*.pdf
+!icon.png

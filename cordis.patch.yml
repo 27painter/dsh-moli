@@ -1,0 +1,10 @@
+- insert:
+    - id: dsh-moli
+      name: dsh-moli
+      config:
+        defaultTimeoutMs: 30000
+        maxChars: 200000
+        # This network's certificate-revocation responder is unreachable, so some
+        # HTTPS hosts (GitHub in particular) fail with CRYPT_E_REVOCATION_OFFLINE.
+        # true passes moli's no-verify flag; set false where revocation works.
+        insecureTls: true

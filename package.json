@@ -1,0 +1,49 @@
+{
+  "name": "dsh-moli",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "DeepSeek Harness tools for the local Moli headless browser: rendered fetches, markdown, semantic trees, screenshots, and PDFs.",
+  "license": "MIT",
+  "author": "27painter",
+  "keywords": [
+    "deepseek-harness",
+    "dsh-plugin",
+    "moli",
+    "headless-browser",
+    "screenshot",
+    "markdown"
+  ],
+  "meta": {
+    "title": "Moli browser tools",
+    "description": "Drive the local moli.exe from DSH: moli_fetch and moli_probe for rendered fetches, Markdown, screenshots, and PDFs."
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/27painter/dsh-moli.git"
+  },
+  "homepage": "https://github.com/27painter/dsh-moli#readme",
+  "bugs": {
+    "url": "https://github.com/27painter/dsh-moli/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "exports": {
+    ".": "./index.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "README.zh.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}
