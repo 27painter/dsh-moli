@@ -30,49 +30,64 @@ const DEFAULTS = {
 /**
  * Parameter schema of `moli_fetch`.
  *
- * The two schema layers follow DIFFERENT rules, which is easy to get wrong:
- * - A parameter spec uses the author DSL, where a property-level `required: true`
- *   is correct. `parameterSchemaSpecToJsonSchema` hoists it into an object-level
- *   `required` array and strips the flag.
- * - A raw output schema is validated as-is, so `required` there must already be an
- *   object-level array of names. A property-level `required: true` makes the
- *   registry reject the whole tool with `JsonSchemaError`.
+ * Both schema layers must be RAW JSON Schema here — object root, with `required`
+ * as an object-level array — because this plugin registers plain definitions with
+ * `ctx.tools.register` instead of going through `defineTool`.
+ *
+ * That choice is forced: `defineTool` lives in `@deepseek-ai/dsh-tools`, a bare
+ * specifier, and a profile plugin is loaded from its real path on disk, so the
+ * specifier does not resolve. `schemaOf` then projects `definition.parameters`
+ * verbatim to the provider — it is NOT converted — so a parameter left in the
+ * author DSL reaches the model without a root `type`, and the provider rejects the
+ * request with `schema must be a JSON Schema of 'type: "object"', got 'type: null'`.
+ *
+ * The two entry points disagree, which is why one shape cannot serve both:
+ * - a raw `output.schema` must use an object-level `required` array; a
+ *   property-level `required: true` fails `assertSupportedJsonSchema` at registration
+ * - `defineTool` is the opposite: its DSL rejects an object-level `required` and
+ *   expects `required: true` on each property instead
+ * Registering raw means the raw rules apply to parameters and outputs alike.
  */
 const FETCH_PARAMETERS = {
-  url: { type: 'string', required: true, description: 'Absolute http:// or https:// URL to fetch.' },
-  dump: {
-    type: 'string',
-    enum: ['html', 'markdown', 'json', 'semantic_tree', 'semantic_tree_text', 'screenshot', 'screenshot_full', 'pdf'],
-    description: 'Output format. Omit for rendered HTML. `markdown` and `semantic_tree_text` are the token-efficient choices for reading a page; `json` carries status and final_url; screenshot/pdf need writeTo.',
+  type: 'object',
+  additionalProperties: false,
+  required: ['url'],
+  properties: {
+    url: { type: 'string', description: 'Absolute http:// or https:// URL to fetch.' },
+    dump: {
+      type: 'string',
+      enum: ['html', 'markdown', 'json', 'semantic_tree', 'semantic_tree_text', 'screenshot', 'screenshot_full', 'pdf'],
+      description: 'Output format. Omit for rendered HTML. `markdown` and `semantic_tree_text` are the token-efficient choices for reading a page; `json` carries status and final_url; screenshot/pdf need writeTo.',
+    },
+    writeTo: {
+      type: 'string',
+      description: 'Absolute path to save the output. Required for screenshot/pdf; optional for text dumps larger than maxChars.',
+    },
+    eval: {
+      type: 'string',
+      description: 'JavaScript expression evaluated once the page is ready; its value is returned as text or JSON instead of the page.',
+    },
+    wait: {
+      type: 'string',
+      enum: ['domcontentloaded', 'load', 'networkidle', 'domstable', 'done'],
+      description: 'Readiness stage to wait for. Defaults to `done`.',
+    },
+    waitSelector: { type: 'string', description: 'Wait until this CSS selector matches.' },
+    delayMs: { type: 'integer', description: 'Extra milliseconds to wait after readiness.' },
+    timeoutMs: { type: 'integer', description: 'Total readiness deadline in milliseconds. Defaults to the plugin configuration.' },
+    maxChars: { type: 'integer', description: 'Truncate inline text output to this many characters. Defaults to the plugin configuration.' },
+    headers: { type: 'array', items: { type: 'string' }, description: 'Extra request headers, each as "Name: value".' },
+    userAgent: { type: 'string', description: 'Override the User-Agent.' },
+    layout: { type: 'boolean', description: 'Force the real layout renderer on. Implied by screenshot and pdf.' },
+    scrollbars: { type: 'boolean', description: 'Show native scrollbars in rendered output.' },
+    noJs: { type: 'boolean', description: 'Disable page-authored JavaScript.' },
+    noCss: { type: 'boolean', description: 'Disable page-authored CSS.' },
+    resources: { type: 'boolean', description: 'Also fetch images, fonts, audio, video, and text tracks.' },
+    withFrames: { type: 'boolean', description: 'Include subframes in the output.' },
+    insecureTls: { type: 'boolean', description: 'Skip TLS host verification. Use only for a known-broken local endpoint.' },
+    profileDir: { type: 'string', description: 'Moli profile directory carrying imported cookies or storage.' },
+    cookieFile: { type: 'string', description: 'Netscape/curl cookie-jar file to send.' },
   },
-  writeTo: {
-    type: 'string',
-    description: 'Absolute path to save the output. Required for screenshot/pdf; optional for text dumps larger than maxChars.',
-  },
-  eval: {
-    type: 'string',
-    description: 'JavaScript expression evaluated once the page is ready; its value is returned as text or JSON instead of the page.',
-  },
-  wait: {
-    type: 'string',
-    enum: ['domcontentloaded', 'load', 'networkidle', 'domstable', 'done'],
-    description: 'Readiness stage to wait for. Defaults to `done`.',
-  },
-  waitSelector: { type: 'string', description: 'Wait until this CSS selector matches.' },
-  delayMs: { type: 'integer', description: 'Extra milliseconds to wait after readiness.' },
-  timeoutMs: { type: 'integer', description: 'Total readiness deadline in milliseconds. Defaults to the plugin configuration.' },
-  maxChars: { type: 'integer', description: 'Truncate inline text output to this many characters. Defaults to the plugin configuration.' },
-  headers: { type: 'array', items: { type: 'string' }, description: 'Extra request headers, each as "Name: value".' },
-  userAgent: { type: 'string', description: 'Override the User-Agent.' },
-  layout: { type: 'boolean', description: 'Force the real layout renderer on. Implied by screenshot and pdf.' },
-  scrollbars: { type: 'boolean', description: 'Show native scrollbars in rendered output.' },
-  noJs: { type: 'boolean', description: 'Disable page-authored JavaScript.' },
-  noCss: { type: 'boolean', description: 'Disable page-authored CSS.' },
-  resources: { type: 'boolean', description: 'Also fetch images, fonts, audio, video, and text tracks.' },
-  withFrames: { type: 'boolean', description: 'Include subframes in the output.' },
-  insecureTls: { type: 'boolean', description: 'Skip TLS host verification. Use only for a known-broken local endpoint.' },
-  profileDir: { type: 'string', description: 'Moli profile directory carrying imported cookies or storage.' },
-  cookieFile: { type: 'string', description: 'Netscape/curl cookie-jar file to send.' },
 };
 
 /**
@@ -266,14 +281,20 @@ export function apply(ctx, config) {
       + ' reports the executable and the SHA256 of the installer it ran. Use "install" only when moli_fetch'
       + ' reports that moli.exe is missing; it downloads and executes third-party code.',
     parameters: {
-      action: {
-        type: 'string',
-        enum: ['probe', 'install'],
-        description: '`probe` (default) only inspects; `install` downloads and runs the official release installer.',
-      },
-      expectedSha256: {
-        type: 'string',
-        description: 'With action "install": abort unless the downloaded installer matches this SHA256.',
+      type: 'object',
+      additionalProperties: false,
+      // No required entries: every parameter is optional, and each execution path
+      // validates what it actually needs.
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['probe', 'install'],
+          description: '`probe` (default) only inspects; `install` downloads and runs the official release installer.',
+        },
+        expectedSha256: {
+          type: 'string',
+          description: 'With action "install": abort unless the downloaded installer matches this SHA256.',
+        },
       },
     },
     output: { schema: PROBE_OUTPUT_SCHEMA, render: renderProbe },

@@ -1,14 +1,18 @@
-// Validate the plugin's schemas with the REGISTRY'S OWN validator.
+// Validate the plugin's tool definitions with the REGISTRY'S OWN validator.
 //
-// This is the test that was missing. Every earlier test used a fake `ctx.tools`
-// whose `register` only stored the definition, so `assertSupportedJsonSchema` never
-// ran and an invalid schema shipped. A real DSH then refused to activate the plugin:
+// This is the test that was missing twice over. Every earlier test used a fake
+// `ctx.tools` whose `register` only stored the definition, so nothing the real
+// registry or the model provider checks was ever exercised. Two shipping failures
+// came out of that hole:
 //
-//   JsonSchemaError: unsupported JSON schema:
-//     schema.properties.ok.required is not supported on type "boolean"
+//   1. a raw output schema using the property-level `required: true` form ->
+//      `JsonSchemaError` at registration, so the plugin never activated
+//   2. parameters left in the author DSL -> `schemaOf` projects them to the
+//      provider verbatim -> `schema must be a JSON Schema of 'type: "object"',
+//      got 'type: null'`
 //
-// Importing the registry's validator directly keeps the check honest without
-// standing up a whole Host.
+// Both layers must therefore be RAW JSON Schema, because this plugin registers
+// plain definitions instead of going through `defineTool`.
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -17,8 +21,7 @@ const dshRoot = join(process.env.APPDATA, 'npm', 'node_modules', '@deepseek-ai',
 const toolsEntry = join(dshRoot, 'node_modules', '@deepseek-ai', 'dsh-tools', 'lib', 'index.js');
 if (!existsSync(toolsEntry)) throw new Error(`dsh-tools not found at ${toolsEntry}`);
 
-const { assertSupportedJsonSchema, parameterSchemaSpecToJsonSchema, validateArgs, JsonSchemaError } =
-  await import(pathToFileURL(toolsEntry).href);
+const { assertSupportedJsonSchema, validateArgs, defineTool } = await import(pathToFileURL(toolsEntry).href);
 
 const pluginDir = process.argv[2] ?? 'D:/dsh_plugins/dsh-moli';
 const registered = new Map();
@@ -32,61 +35,57 @@ const check = (label, ok, extra = '') => {
   if (ok) { pass++; console.log(`  PASS ${label}${extra ? ' -- ' + extra : ''}`); }
   else { fail++; console.log(`  FAIL ${label}${extra ? ' -- ' + extra : ''}`); }
 };
-
-/** Try the registry's validator and report what it says. */
-const validate = schema => {
-  try {
-    assertSupportedJsonSchema(schema);
-    return { ok: true };
-  } catch (error) {
-    return { ok: false, message: error instanceof JsonSchemaError ? error.message : String(error) };
-  }
+const trySchema = schema => {
+  try { assertSupportedJsonSchema(schema); return { ok: true }; }
+  catch (error) { return { ok: false, message: String(error.message) }; }
 };
 
 console.log(`plugin dir : ${pluginDir}`);
-console.log(`validator  : ${toolsEntry}\n`);
-console.log(`tools registered: ${[...registered.keys()].join(', ')}\n`);
+console.log(`validator  : ${toolsEntry}`);
+console.log(`registered : ${[...registered.keys()].join(', ')}\n`);
 
 for (const [name, def] of registered) {
   console.log(`=== ${name} ===`);
 
-  // Parameters: the registry's DSL must convert, and the conversion must be valid.
-  let converted;
-  try {
-    converted = parameterSchemaSpecToJsonSchema(def.parameters);
-    check('parameter DSL converts', true);
-  } catch (error) {
-    check('parameter DSL converts', false, String(error.message).slice(0, 140));
-  }
-  if (converted !== undefined) {
-    const r = validate(converted);
-    check('converted parameters pass the registry validator', r.ok, r.ok ? '' : String(r.message).slice(0, 200));
-    console.log(`    converted: ${JSON.stringify(converted).slice(0, 220)}`);
-  }
+  // The provider receives definition.parameters verbatim, so these are the checks
+  // that matter: a raw object root, and acceptance by the registry validator.
+  const p = def.parameters;
+  check('parameters is an object', typeof p === 'object' && p !== null && !Array.isArray(p));
+  check('parameters.type is "object"', p.type === 'object', `got ${JSON.stringify(p.type)}`);
+  check('parameters carries no DSL artefact', !JSON.stringify(p).includes('"required":true'));
+  const pr = trySchema(p);
+  check('parameters passes the registry validator', pr.ok, pr.ok ? '' : String(pr.message).slice(0, 160));
 
-  // The raw output schema is validated as-is by the registry.
-  const r2 = validate(def.output.schema);
-  check('output schema passes the registry validator', r2.ok, r2.ok ? '' : String(r2.message).slice(0, 240));
+  const or = trySchema(def.output.schema);
+  check('output schema passes the registry validator', or.ok, or.ok ? '' : String(or.message).slice(0, 200));
+  check('output schema type is "object"', def.output.schema.type === 'object');
 
-  // Reject the exact form that broke activation, to prove the check has teeth.
-  const bad = validate({ type: 'object', properties: { ok: { type: 'boolean', required: true } } });
-  check('  (control) property-level required is rejected', bad.ok === false, bad.ok ? 'validator accepted it!' : String(bad.message).slice(0, 90));
+  // Required semantics must still be enforced where they are declared.
+  const declared = Array.isArray(p.required) ? p.required : [];
+  if (declared.length > 0) {
+    const missing = validateArgs(p, {});
+    check(`declared required (${declared.join(',')}) is enforced`, missing.length > 0, JSON.stringify(missing).slice(0, 80));
+    const good = validateArgs(p, Object.fromEntries(declared.map(k => [k, k === 'url' ? 'https://example.com' : 'x'])));
+    check('a call supplying them passes argument validation', good.length === 0, JSON.stringify(good).slice(0, 80));
+  } else {
+    check('no required parameters declared', true, '(all optional by design)');
+  }
   console.log('');
 }
 
-console.log('=== argument validation still behaves ===');
-const fetchDef = registered.get('moli_fetch');
-if (fetchDef !== undefined) {
-  const paramSchema = parameterSchemaSpecToJsonSchema(fetchDef.parameters);
-  const good = validateArgs(fetchDef.parameters, { url: 'https://example.com' });
-  check('a valid call has no violations', good.length === 0, JSON.stringify(good).slice(0, 120));
-  const missing = validateArgs(fetchDef.parameters, {});
-  check('a missing url is rejected', missing.length > 0, JSON.stringify(missing).slice(0, 120));
-  const badType = validateArgs(fetchDef.parameters, { url: 42 });
-  check('a non-string url is rejected', badType.length > 0, JSON.stringify(badType).slice(0, 120));
-  check('url is still declared required', JSON.stringify(paramSchema).includes('"required"'), String(paramSchema.required ?? paramSchema.properties?.url?.required));
-  const strictMissing = validateArgs(fetchDef.parameters, {});
-  check('the required array survived conversion', strictMissing.length > 0, JSON.stringify(strictMissing));
+console.log('=== control: the shapes that broke shipping must still be rejected ===');
+const c1 = trySchema({ type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean', required: true } } });
+check('property-level required in a raw output schema is rejected', c1.ok === false, String(c1.message).slice(0, 70));
+try {
+  defineTool({
+    name: 'c2', description: 'c2',
+    parameters: { url: { type: 'string', required: true } },
+    output: { schema: { type: 'object', additionalProperties: true, required: ['ok'], properties: { ok: { type: 'boolean' } } }, render: () => [] },
+    execute: () => Promise.resolve({}),
+  });
+  check('object-level required inside defineTool is rejected', false, 'defineTool accepted it');
+} catch (error) {
+  check('object-level required inside defineTool is rejected', true, String(error.message).slice(0, 70));
 }
 
 console.log(`\nresult: ${pass} passed, ${fail} failed`);
