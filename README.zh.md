@@ -110,7 +110,8 @@ moli_fetch url=https://example.com dump=markdown
 
 `moli_probe` 会报告引擎是否在场。如果不在，三种方式任选：
 
-**1. 让插件替你装**——多路径下载，并报告实际执行字节的 SHA256：
+**1. 让插件替你装**——多路径下载，并报告实际执行字节的 SHA256。整个过程异步（主机照常服务），配置的
+`proxy` 会同时传给下载路由与安装器内部的引擎下载：
 
 ```
 moli_probe action=install
@@ -247,13 +248,23 @@ Moli 仓库自带官方 agent skill：[`moli-webfetch`](https://github.com/lexmo
 | 平台 | 状态 |
 |---|---|
 | **Windows** | 由维护者验证 |
-| **Linux** | 由贡献者在 Ubuntu 24.04 LTS、Node v24.21.0、DSH 0.2.1-alpha.2、dsh-moli 1.1.0、Moli 1.1.17 上验证通过 |
+| **Linux** | 在 Ubuntu 24.04 LTS、Node v24.21.0、Moli 1.1.17 上验证——含异步安装路径、代理注入、以及 strace 记录的全链路抓取 |
 | **macOS** | 已实现，尚未在真机验证 |
 
 - **Windows** —— 引擎在官方安装位置查找（`%LOCALAPPDATA%\Moli\bin\moli.exe` 与 `%USERPROFILE%\.local\bin\moli.exe`），
   并以 `%LOCALAPPDATA%\Moli` 递归扫描兜底；`moli_probe action=install` 走官方 PowerShell 安装器。
 - **Linux / macOS** —— 引擎在标准位置（`~/.local/bin/moli`、`~/.local/share/moli/bin/moli`、
   `~/.local/share/moli/moli`、`~/.moli/bin/moli`）与 `$PATH` 中查找；`moli_probe action=install` 通过 `sh` 执行官方 `moli-installer.sh`。
+
+**安装绝不阻塞 DSH 主机。** 安装器的下载与执行都以异步 spawn 进行，超时先 SIGTERM 再 SIGKILL，
+被中断的回合会立刻终止子进程——Moli 安装器干活期间主机照常服务。用 `strace -e trace=connect`
+对真实安装抓包，记录的每次连接都走配置的代理端口、没有任何直连上游主机；fixture 安装器也确认
+代理进入了子进程的环境。
+
+配置的 `proxy` **同时喂两个阶段**：插件自己的下载路由（`curl --proxy`，以及 PowerShell `Invoke-WebRequest`
+的 `-Proxy`），以及官方安装器内部的引擎下载——Windows 上通过 `DefaultWebProxy` prelude（PowerShell
+的 `Invoke-WebRequest` 不读代理环境变量），POSIX 上通过安装器 `curl` 会读取的标准 `HTTPS_PROXY`/
+`HTTP_PROXY`/`ALL_PROXY` 变量。带凭据的代理会显式设置凭据。
 
 在 Linux 上，`moli_probe` 无需干预就找到了 `~/.local/bin/moli`；`moli_fetch` 端到端渲染了一个地区限制的
 电商站——经由本地正向代理、并带上 Netscape 格式的 `cookieFile`——返回 500+ KB 的页面，最终 URL 带上了
@@ -271,7 +282,7 @@ cookie 驱动的查询参数。那次实测同时覆盖了代理下载路由与�
         exePath: 'C:\Users\me\AppData\Local\Moli\bin\moli.exe'  # 默认自动探测
         defaultTimeoutMs: 30000                                  # 单次抓取就绪超时
         maxChars: 200000                                         # 内联文本截断阈值
-        proxy: 'http://127.0.0.1:7890'                           # 转给本地正向代理
+        proxy: 'http://127.0.0.1:7890'                           # 转给本地正向代理（moli、下载、安装器内部引擎下载都走它）
         insecureTls: true                                        # 见下方 TLS 说明
 ```
 
@@ -287,8 +298,8 @@ cookie 驱动的查询参数。那次实测同时覆盖了代理下载路由与�
   [issue](https://github.com/27painter/dsh-moli/issues)**——那是这些路径能被打通的唯一途径。
 - **不包含 Moli 本体。** 需自行安装，或让 `moli_probe action=install` 替你拉取。
 - **只封装了 `fetch`。** `moli serve`（CDP/WebDriver 服务器）与 `moli import`（会话导入）尚未做成工具。
-- **不支持单次取消。** 引擎是同步执行的，被中断的回合无法中途终止抓取；已在进行的调用会跑完并
-  写出产物。
+- **抓取不支持单次取消。** 引擎对抓取是同步执行的，被中断的回合无法中途终止；已在进行的调用会跑完并
+  写出产物。`moli_probe action=install` 是例外——它是异步的，被中断的回合会立刻终止子进程。
 - **HTTP 错误码只在 `dump: json` 下可见。** 那是唯一携带状态字段的格式；用 `markdown` 或 `html`
   时错误页会作为内容返回。
 - **`writeTo` 调用被串行化。** 它们声明为不可并行，因此两次产物写入不会交错。
@@ -306,11 +317,16 @@ cookie 驱动的查询参数。那次实测同时覆盖了代理下载路由与�
 
 ## 验证情况
 
-[`verify/`](verify/) 下有两个可直接对工作区运行的测试：
+[`verify/`](verify/) 下有四个可直接对工作区运行的测试：
 
 - `schema-verify.mjs` 用注册表自己的校验器检查工具定义，并带有断言"两种非法 schema 形状仍会被拒"的对照组。
 - `install-verify.mjs` 用本地回环 HTTP 服务器驱动安装链路：路由顺序、被提供字节的 SHA256、校验不匹配时
   拒绝执行、匹配时真正执行、以及全部路径失败的诊断。
+- `linux-verify.mjs`（POSIX 主机）断言代理辅助函数，然后对真实安装验证异步改造的两个保证：安装器子进程
+  确实通过环境收到代理（fixture 安装器捕获 `HTTPS_PROXY`），以及慢安装器运行期间主机事件循环保持活跃——
+  这正是异步路径的验收标准。
+- `win-verify.mjs`（Windows 主机）跑同样的纯函数断言，然后在真实 `powershell.exe` 里执行 `DefaultWebProxy`
+  prelude 并检查它设置的代理对象与凭据，练习 Windows 下载路由，并端到端跑 `installMoli`。
 
 此外，`lib/moli.js` 与工具层在 Windows 上对 Moli 1.1.16 做了端到端验证：注册、probe、Markdown 与 JSON
 dump、`eval`（含针对 `-t` 参数位置的紧超时回归防护）、PNG 与 PDF 产物签名、截断、全部拒绝路径（二元 dump

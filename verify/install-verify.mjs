@@ -8,7 +8,7 @@
 //    serve the fixture file it wrote itself.
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -29,15 +29,20 @@ const check = (label, ok, extra = '') => {
   else { fail++; console.log(`  FAIL ${label}${extra ? ' -- ' + extra : ''}`); }
 };
 
-// The fixture installer writes a marker when it runs. ASCII, no BOM: Windows
-// PowerShell reads a BOM-less UTF-8 .ps1 as the system codepage.
+// The fixture installer writes a marker when it runs. ASCII, no BOM, and the
+// script format matches the platform under test: Windows PowerShell (a BOM-less
+// UTF-8 .ps1 reads as the system codepage) or POSIX sh.
+const isWin = process.platform === 'win32';
 const dir = mkdtempSync(join(tmpdir(), 'dsh-moli-fixture-'));
-const fixture = join(dir, 'moli-installer.ps1');
+const fixtureName = isWin ? 'moli-installer.ps1' : 'moli-installer.sh';
+const fixture = join(dir, fixtureName);
 const marker = join(dir, 'ran.txt');
-const script = `Set-Content -Path '${marker.replace(/\\/gu, '\\\\')}' -Value 'INSTALLER-RAN'; exit 0\n`;
+const script = isWin
+  ? `Set-Content -Path '${marker.replace(/\\/gu, '\\\\')}' -Value 'INSTALLER-RAN'; exit 0\n`
+  : `#!/bin/sh\nprintf 'INSTALLER-RAN' > '${marker}'\nexit 0\n`;
 writeFileSync(fixture, script, { encoding: 'utf8' });
 const installerSha = createHash('sha256').update(Buffer.from(script, 'utf8')).digest('hex');
-const installerUrl = `${BASE}/moli-installer.ps1`;
+const installerUrl = `${BASE}/${fixtureName}`;
 
 const server = spawn(process.execPath, [join(here, 'test-server.mjs'), fixture, String(PORT)], { stdio: 'ignore' });
 await new Promise(resolve => setTimeout(resolve, 1500));
@@ -55,7 +60,7 @@ check('garbage proxy not listening', (await proxyListens('not-a-url')) === false
 
 console.log('\n1. download routes (dead proxy supplied, must be skipped)');
 const dl = await downloadInstaller({
-  target: join(mkdtempSync(join(tmpdir(), 'dsh-moli-dl-')), 'i.ps1'),
+  target: join(mkdtempSync(join(tmpdir(), 'dsh-moli-dl-')), `i${isWin ? '.ps1' : '.sh'}`),
   installerUrl,
   proxy: 'http://127.0.0.1:9',
   timeoutMs: 20000,
@@ -81,11 +86,17 @@ check('digest survived', good.installerSha256 === installerSha);
 check('manual fallback offered', typeof good.manualInstall?.powershell === 'string');
 
 console.log('\n4. all-routes-fail diagnostics');
+// A fake moli binary exists so the self-bootstrap route joins the chain; both
+// routes then fail against the dead loopback URL and the diagnostics are what
+// is under test, not the count.
+const fakeMoli = join(mkdtempSync(join(tmpdir(), 'dsh-moli-fakebin-')), 'moli');
+writeFileSync(fakeMoli, '#!/bin/sh\necho fetch-failed >&2\nexit 1\n', { encoding: 'utf8' });
+chmodSync(fakeMoli, 0o755);
 const dead = await downloadInstaller({
-  target: join(mkdtempSync(join(tmpdir(), 'dsh-moli-dead-')), 'i.ps1'),
-  installerUrl: 'http://127.0.0.1:9/none.ps1',
+  target: join(mkdtempSync(join(tmpdir(), 'dsh-moli-dead-')), `i${isWin ? '.ps1' : '.sh'}`),
+  installerUrl: `http://127.0.0.1:9/none${isWin ? '.ps1' : '.sh'}`,
   timeoutMs: 15000,
-  locate: () => undefined,
+  locate: () => fakeMoli,
 });
 check('reported failure', dead.ok === false);
 check('several routes tried', dead.attempts.length >= 2, `${dead.attempts.length}: ${dead.attempts.map(a => a.method).join(', ')}`);

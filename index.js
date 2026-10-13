@@ -300,7 +300,7 @@ export function apply(ctx, config) {
     output: { schema: PROBE_OUTPUT_SCHEMA, render: renderProbe },
     // Installation downloads and executes code, so it must never overlap itself.
     isConcurrencySafe: args => args.action !== 'install',
-    async execute(args) {
+    async execute(args, exec) {
       // An explicit install request is honoured even when an engine already
       // exists, so the action can also repair or upgrade an installation. Anything
       // else only inspects, because installing downloads and runs code.
@@ -309,14 +309,19 @@ export function apply(ctx, config) {
           exePath: options.exePath,
           expectedSha256: args.expectedSha256,
           timeoutMs: options.installTimeoutMs ?? 180000,
+          proxy: options.proxy,
           locate: findMoli,
           candidates: moliCandidates(options.exePath),
+          signal: exec?.signal,
         });
         if (outcome.ok === true) {
           cachedExe = outcome.exe;
           ctx.logger?.info?.(`dsh-moli: installed ${String(outcome.version)} at ${String(outcome.exe)}`);
         }
-        return outcome;
+        // The output schema declares `installed` as required, but installMoli's
+        // outcome carries `ok` instead. Surface both so the registry validator
+        // accepts the result and renderProbe still sees the shape it expects.
+        return { ...outcome, installed: outcome.ok === true };
       }
 
       const exe = engine();

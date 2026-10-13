@@ -119,7 +119,9 @@ moli_fetch url=https://example.com dump=markdown
 
 `moli_probe` reports whether the engine is present. If it is not, pick one of:
 
-**1. Let the plugin install it** — tries several download routes and reports a SHA256 of what it ran:
+**1. Let the plugin install it** — tries several download routes and reports a SHA256 of what it ran.
+   The whole run is asynchronous (the host keeps serving), and a configured `proxy` is passed to both
+   the download routes and the installer's own engine download:
 
 ```
 moli_probe action=install
@@ -266,7 +268,7 @@ Works on **Windows, Linux and macOS** (x64 / arm64).
 | Platform | Status |
 |---|---|
 | **Windows** | Verified by the maintainer |
-| **Linux** | Verified by the contributor on Ubuntu 24.04 LTS, Node v24.21.0, DSH 0.2.1-alpha.2, dsh-moli 1.1.0, Moli 1.1.17 |
+| **Linux** | Verified on Ubuntu 24.04 LTS, Node v24.21.0, Moli 1.1.17 — including the async install path, proxy injection, and a `strace`-recorded end-to-end fetch |
 | **macOS** | Implemented, not yet verified on a real host |
 
 - **Windows** — the engine is located at the official installer paths (`%LOCALAPPDATA%\Moli\bin\moli.exe`,
@@ -275,6 +277,19 @@ Works on **Windows, Linux and macOS** (x64 / arm64).
 - **Linux / macOS** — the engine is found in the standard locations (`~/.local/bin/moli`,
   `~/.local/share/moli/bin/moli`, `~/.local/share/moli/moli`, `~/.moli/bin/moli`) and on `$PATH`.
   `moli_probe action=install` runs the official `moli-installer.sh` via `sh`.
+
+**Installing never blocks the DSH host.** Both the installer download and the execution of the
+official installer spawn asynchronously with a timeout that escalates from SIGTERM to SIGKILL, and
+an interrupted turn aborts the child immediately — the host keeps serving while Moli's installer
+does its work. A `strace -e trace=connect` run against a real install recorded every connection
+going through the configured proxy port and none to the upstream host, and a fixture installer
+confirmed the proxy arrives in the child's environment.
+
+The configured `proxy` feeds **both** phases: the plugin's own download routes (`curl --proxy`, and
+`-Proxy` on PowerShell's `Invoke-WebRequest`), and the official installer's internal engine download
+— on Windows through a `DefaultWebProxy` prelude (PowerShell's `Invoke-WebRequest` ignores proxy
+environment variables), on POSIX through the standard `HTTPS_PROXY`/`HTTP_PROXY`/`ALL_PROXY`
+variables the installer's `curl` reads. A proxy carrying credentials sets them explicitly.
 
 On Linux, `moli_probe` discovered `~/.local/bin/moli` unaided, and `moli_fetch` rendered a
 region-gated storefront end to end — through a local forward proxy, with a Netscape `cookieFile` —
@@ -293,7 +308,7 @@ Override any field under the plugin's `config` entry in the profile patch layer.
         exePath: 'C:\Users\me\AppData\Local\Moli\bin\moli.exe'  # default: auto-detect
         defaultTimeoutMs: 30000                                  # per-fetch readiness deadline
         maxChars: 200000                                         # inline text truncation
-        proxy: 'http://127.0.0.1:7890'                           # forward proxy for moli and downloads
+        proxy: 'http://127.0.0.1:7890'                           # forward proxy for moli, downloads, and the installer's engine download
         insecureTls: true                                        # see the TLS notes below
 ```
 
@@ -312,8 +327,10 @@ installation under a versioned subdirectory is still found.
 - **Moli itself is not bundled.** Install it separately or let `moli_probe action=install` fetch it.
 - **Only `fetch` is wrapped.** `moli serve` (CDP/WebDriver server) and `moli import` (session
   import) are not exposed as tools yet.
-- **No per-call cancellation.** The engine runs synchronously, so an interrupted turn cannot abort
-  a fetch mid-flight. A call already in progress finishes and its artifact is written.
+- **No per-call cancellation for fetches.** The engine runs synchronously for a fetch, so an
+  interrupted turn cannot abort it mid-flight; a call already in progress finishes and its artifact
+  is written. `moli_probe action=install` is the exception — it is asynchronous and aborts the child
+  immediately on an interrupted turn.
 - **HTTP error status is only visible for `dump: json`.** That is the only dump format carrying the
   status field. With `markdown` or `html` an error page is returned as content.
 - **`writeTo` calls are serialized.** They report as unsafe to parallelize, so two artifact writes
@@ -336,13 +353,20 @@ installation under a versioned subdirectory is still found.
 
 ## Verification
 
-Two suites live in [`verify/`](verify/), and both are runnable against a working tree:
+Four suites live in [`verify/`](verify/), and all are runnable against a working tree:
 
 - `schema-verify.mjs` checks the tool definitions with the registry's own validator, including
   controls that assert the two invalid schema shapes still fail.
 - `install-verify.mjs` drives the install pipeline against a loopback HTTP server: route ordering,
   the SHA256 of served bytes, refusal to execute on a checksum mismatch, actual execution when the
   digest matches, and the all-routes-failed diagnostic.
+- `linux-verify.mjs` (POSIX hosts) asserts the proxy-helper functions, then against a real install
+  proves the two guarantees of the async rewrite: the installer child actually receives the proxy
+  through its environment (`HTTPS_PROXY` captured by a fixture installer), and the host event loop
+  stays live while a slow installer runs — the acceptance criterion for the async path.
+- `win-verify.mjs` (Windows hosts) runs the same pure assertions, then executes the `DefaultWebProxy`
+  prelude in a real `powershell.exe` and inspects the proxy object and credentials it set, exercises
+  the Windows download routes, and runs `installMoli` end to end.
 
 Beyond those, `lib/moli.js` and the tool layer were exercised end to end against Moli 1.1.16 on
 Windows: registration, probe, Markdown and JSON dumps, `eval` (including a tight-timeout regression
