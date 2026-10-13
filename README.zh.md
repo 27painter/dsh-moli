@@ -236,6 +236,15 @@ Moli 仓库自带官方 agent skill：[`moli-webfetch`](https://github.com/lexmo
    导入（例如 `@deepseek-ai/schemastery`）都会解析到插件目录而非 profile 的 `node_modules`，导致
    插件加载失败。本插件只导入 `node:` 内置模块和自己的文件。
 
+## 平台支持
+
+支持 **Windows、Linux、macOS**（x64 / arm64）。
+
+- **Windows** —— 引擎在官方安装位置查找（`%LOCALAPPDATA%\Moli\bin\moli.exe` 与 `%USERPROFILE%\.local\bin\moli.exe`），
+  并以 `%LOCALAPPDATA%\Moli` 递归扫描兜底；`moli_probe action=install` 走官方 PowerShell 安装器。
+- **Linux / macOS** —— 引擎在标准位置（`~/.local/bin/moli`、`~/.local/share/moli/bin/moli`、
+  `~/.local/share/moli/moli`、`~/.moli/bin/moli`）与 `$PATH` 中查找；`moli_probe action=install` 通过 `sh` 执行官方 `moli-installer.sh`。
+
 ## 配置
 
 在 profile 的补丁层里覆盖 `config`，全部可选：

@@ -1,4 +1,4 @@
-/** Host half of dsh-moli: expose the local `moli.exe` headless browser as callable tools. */
+/** Host half of dsh-moli: expose the local `moli` headless browser as callable tools. */
 import { MANUAL_INSTALL, installMoli } from './lib/install.js';
 import { findMoli, moliCandidates, probe, runFetch } from './lib/moli.js';
 
@@ -198,7 +198,7 @@ function renderProbe(_args, value) {
     return [{ type: 'text', text: lines.join('\n') }];
   }
   if (value.installed !== true) {
-    const lines = ['moli.exe was not found. Call moli_probe with action "install", or set the plugin config field `exePath`.'];
+    const lines = ['moli was not found. Call moli_probe with action "install", or set the plugin config field `exePath`.'];
     lines.push(`Manual install — PowerShell: ${MANUAL_INSTALL.powershell}`);
     lines.push(`Manual install — Linux/macOS: ${MANUAL_INSTALL.shell}`);
     return [{ type: 'text', text: lines.join('\n') }];
@@ -239,7 +239,7 @@ export function apply(ctx, config) {
   const insecureTls = options.insecureTls ?? DEFAULTS.insecureTls;
 
   if (cachedExe === undefined) {
-    ctx.logger?.warn?.('dsh-moli: moli.exe not found; moli_probe can install it, or set config.exePath');
+    ctx.logger?.warn?.('dsh-moli: moli not found; moli_probe can install it, or set config.exePath');
   }
 
   ctx.tools.register({
@@ -247,7 +247,7 @@ export function apply(ctx, config) {
     description: 'Fetch a URL with the local Moli headless browser: rendered HTML or Markdown, the semantic'
       + ' tree, a JSON envelope with status and final_url, a JavaScript expression result, a PNG screenshot, or a'
       + ' PDF. Use it for pages that need real rendering or JavaScript; prefer web_fetch for plain text. Screenshot'
-      + ' and pdf dumps require writeTo. If moli.exe is missing, run moli_probe with action "install" first.',
+      + ' and pdf dumps require writeTo. If moli is missing, run moli_probe with action "install" first.',
     parameters: FETCH_PARAMETERS,
     output: { schema: FETCH_OUTPUT_SCHEMA, render: renderFetch },
     isConcurrencySafe: args => args.writeTo === undefined || args.writeTo === '',
@@ -258,9 +258,9 @@ export function apply(ctx, config) {
         return {
           ok: false,
           url: args.url,
-          error: 'moli.exe was not found',
+          error: 'moli was not found',
           sandboxTlsBlock: false,
-          hint: 'Call moli_probe with action "install" to download it, or set the dsh-moli config field `exePath` to the absolute moli.exe path.',
+          hint: 'Call moli_probe with action "install" to download it, or set the dsh-moli config field `exePath` to the absolute moli path.',
           manualInstall: MANUAL_INSTALL,
         };
       }
@@ -279,7 +279,7 @@ export function apply(ctx, config) {
     description: 'Report the local Moli install: version, executable path, and whether HTTPS fetching works from'
       + ' this process. With action "install" it downloads and runs the official Moli installer instead, then'
       + ' reports the executable and the SHA256 of the installer it ran. Use "install" only when moli_fetch'
-      + ' reports that moli.exe is missing; it downloads and executes third-party code.',
+      + ' reports that moli is missing; it downloads and executes third-party code.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -321,7 +321,7 @@ export function apply(ctx, config) {
 
       const exe = engine();
       if (exe === undefined) {
-        return { installed: false, detail: 'moli.exe not found. Re-run with action "install" to download it.', manualInstall: MANUAL_INSTALL };
+        return { installed: false, detail: 'moli not found. Re-run with action "install" to download it.', manualInstall: MANUAL_INSTALL };
       }
       const result = probe(exe, 'https://example.com', insecureTls);
       return {
@@ -336,5 +336,5 @@ export function apply(ctx, config) {
     },
   });
 
-  ctx.logger?.info?.(`dsh-moli: registered moli_fetch and moli_probe (${cachedExe ?? 'moli.exe missing'})`);
+  ctx.logger?.info?.(`dsh-moli: registered moli_fetch and moli_probe (${cachedExe ?? 'moli missing'})`);
 }

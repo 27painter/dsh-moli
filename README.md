@@ -255,6 +255,17 @@ capabilities always visible to the model.
    resolves against the plugin directory instead of the profile's `node_modules` and the plugin
    fails to load. This plugin imports only `node:` builtins and its own files.
 
+## Platform support
+
+Works on **Windows, Linux and macOS** (x64 / arm64).
+
+- **Windows** — the engine is located at the official installer paths (`%LOCALAPPDATA%\Moli\bin\moli.exe`,
+  `%USERPROFILE%\.local\bin\moli.exe`) with a recursive scan of `%LOCALAPPDATA%\Moli` as a fallback.
+  `moli_probe action=install` runs the official PowerShell installer.
+- **Linux / macOS** — the engine is found in the standard locations (`~/.local/bin/moli`,
+  `~/.local/share/moli/bin/moli`, `~/.local/share/moli/moli`, `~/.moli/bin/moli`) and on `$PATH`.
+  `moli_probe action=install` runs the official `moli-installer.sh` via `sh`.
+
 ## Configuration
 
 Override any field under the plugin's `config` entry in the profile patch layer. All are optional.
