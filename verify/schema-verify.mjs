@@ -21,7 +21,7 @@ const dshRoot = join(process.env.APPDATA, 'npm', 'node_modules', '@deepseek-ai',
 const toolsEntry = join(dshRoot, 'node_modules', '@deepseek-ai', 'dsh-tools', 'lib', 'index.js');
 if (!existsSync(toolsEntry)) throw new Error(`dsh-tools not found at ${toolsEntry}`);
 
-const { assertSupportedJsonSchema, validateArgs, defineTool } = await import(pathToFileURL(toolsEntry).href);
+const { assertSupportedJsonSchema, validateJsonSchemaValue, defineTool } = await import(pathToFileURL(toolsEntry).href);
 
 const pluginDir = process.argv[2] ?? 'D:/dsh_plugins/dsh-moli';
 const registered = new Map();
@@ -61,12 +61,21 @@ for (const [name, def] of registered) {
   check('output schema type is "object"', def.output.schema.type === 'object');
 
   // Required semantics must still be enforced where they are declared.
+  //
+  // `validateArgs` is NOT the runtime path: it converts its argument with the author
+  // DSL compiler first, so it only accepts a DSL spec and throws on a raw schema.
+  // Runtime argument validation is `validateJsonSchemaValue(parameters, args)` —
+  // see `defineTool`'s own `const validate = (args) => validateJsonSchemaValue(...)`.
+  // Using the wrong one here produced a false alarm about a contradiction that does
+  // not exist.
   const declared = Array.isArray(p.required) ? p.required : [];
   if (declared.length > 0) {
-    const missing = validateArgs(p, {});
+    const missing = validateJsonSchemaValue(p, {});
     check(`declared required (${declared.join(',')}) is enforced`, missing.length > 0, JSON.stringify(missing).slice(0, 80));
-    const good = validateArgs(p, Object.fromEntries(declared.map(k => [k, k === 'url' ? 'https://example.com' : 'x'])));
+    const good = validateJsonSchemaValue(p, Object.fromEntries(declared.map(k => [k, k === 'url' ? 'https://example.com' : 'x'])));
     check('a call supplying them passes argument validation', good.length === 0, JSON.stringify(good).slice(0, 80));
+    const wrongType = validateJsonSchemaValue(p, { url: 42 });
+    check('a wrong-typed argument is rejected', wrongType.length > 0, JSON.stringify(wrongType).slice(0, 80));
   } else {
     check('no required parameters declared', true, '(all optional by design)');
   }

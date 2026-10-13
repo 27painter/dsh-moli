@@ -19,6 +19,14 @@ dsh plugin --profile web add dsh-moli
 dsh plugin --profile web add github:27painter/dsh-moli
 ```
 
+> [!IMPORTANT]
+> **npm 包只有插件本身，不含 Moli 本体。** 它是 26 kB 的 JavaScript；`moli.exe` 引擎是另一个约
+> 101 MB 的 Rust 二进制、有自己的发布流程。所以本插件是**装在 Moli 旁边**，不是把 Moli 打包进来。
+>
+> **Moli 本体没有 npm 包。** registry 上的 `moli` 和 `moli-cli` 属于无关项目，`@lexmount/moli`
+> 并不存在。Moli 以预编译二进制形式发布在
+> [GitHub Releases](https://github.com/lexmount/moli/releases/latest)——**不要靠猜包名去装引擎**。
+
 两种方式都要重启 DSH，然后自检并抓一个页面：
 
 ```
@@ -26,8 +34,38 @@ moli_probe
 moli_fetch url=https://example.com dump=markdown
 ```
 
-Moli 本体是另外下载的。`moli_probe` 会报告它是否在场，`moli_probe action=install` 可以替你拉取。
-详见[安装](#安装)。
+### 获取 Moli 引擎
+
+`moli_probe` 会报告它是否在场。如果不在，三种方式任选：
+
+**1. 让插件替你装** —— 多路径下载，并报告实际执行字节的 SHA256：
+
+```
+moli_probe action=install
+```
+
+**2. 官方一行安装**（Moli 自己的文档命令）：
+
+```powershell
+# Windows
+powershell -ExecutionPolicy ByPass -c "irm https://github.com/lexmount/moli/releases/latest/download/moli-installer.ps1 | iex"
+```
+
+```sh
+# Linux / macOS
+curl --proto '=https' --tlsv1.2 -fsSL https://github.com/lexmount/moli/releases/latest/download/moli-installer.sh | sh
+```
+
+**3. 直接下二进制**（不想跑安装器的话）：
+
+```powershell
+# 从 releases 页挑与你架构匹配的资产
+curl.exe -L -o moli.zip https://github.com/lexmount/moli/releases/latest/download/moli-x86_64-pc-windows-msvc.zip
+Expand-Archive moli.zip -DestinationPath "$env:LOCALAPPDATA\Moli" -Force
+```
+
+这些 `releases/latest/download/...` 链接始终指向最新发布，所以不用钉版本号也不会失效。想核对下载内容，
+见[校验下载](#校验下载)；同样的命令放在上下文里，见[手动安装 Moli](#手动安装-moli)。
 
 ## 与 Moli 官方 agent skill 的关系
 
@@ -107,6 +145,15 @@ moli_probe action=install
 
 profile 插件需要两半都齐：依赖边 + `dsh.profile.bundles` 条目。缺一个 loader 就看不到它，而无法解析的
 bundle 会被**静默跳过**，只在 stderr 留一行 `skipping profile bundle …`。工具迟迟不出现时先找这行。
+
+从本地目录安装时，完整的四步是：
+
+1. 把本目录放到任意位置，例如 `D:\dsh_plugins\dsh-moli`。
+2. 在该 profile 的 `package.json` 中加入：
+   - `dependencies`: `"dsh-moli": "link:D:/dsh_plugins/dsh-moli"`
+   - `dsh.profile.bundles`: `"dsh-moli"`
+3. 在 profile 目录执行 `pnpm install`（生成 `node_modules/dsh-moli`）。
+4. 重启 DSH。
 
 ## 手动安装 Moli
 
@@ -192,33 +239,8 @@ moli-x86_64-pc-windows-msvc.zip  43.8 MB  sha256:5247309837b6eaf6e73bfa18f2a8d8d
 ```
 
 未设置 `exePath` 时探测顺序：`exePath` → 环境变量 `MOLI_BIN` → `%LOCALAPPDATA%\Moli\bin\moli.exe`
-→ `%USERPROFILE%\.local\bin\moli.exe`。
-
-## 安装
-
-先装 Moli 本体——本插件只负责驱动它，不分发它。Windows 上：
-
-```powershell
-powershell -ExecutionPolicy ByPass -c "irm https://github.com/lexmount/moli/releases/latest/download/moli-installer.ps1 | iex"
-```
-
-（Linux/macOS 用对应的 `moli-installer.sh`，见 [Moli README](https://github.com/lexmount/moli#quick-start)。）
-
-然后插件自身必须**同时**是 profile 依赖与已声明的 bundle，缺一个 loader 就看不到它：
-
-1. 把本目录放到任意位置，例如 `D:\dsh_plugins\dsh-moli`。
-2. 在该 profile 的 `package.json` 中加入：
-   - `dependencies`: `"dsh-moli": "link:D:/dsh_plugins/dsh-moli"`
-   - `dsh.profile.bundles`: `"dsh-moli"`
-3. 在 profile 目录执行 `pnpm install`（生成 `node_modules/dsh-moli`）。
-4. 重启 DSH。
-
-注意：
-
-- `dsh plugin --profile desktop …` 会被拒绝：desktop profile 归 Electron 应用所有。直接改它的
-  `package.json`，或用应用内插件页（侧边栏 →**插件**→**添加插件**），那条路径同样走 pnpm。
-- bundle 无法解析或未通过兼容性检查时，loader 会**静默跳过**，只在 stderr 留一行
-  `skipping profile bundle …`。工具迟迟不出现时先找这行。
+→ `%USERPROFILE%\.local\bin\moli.exe`，随后还会在 `%LOCALAPPDATA%\Moli` 内递归查找 `moli.exe`，
+所以装在带版本号的子目录里也能找到。
 
 ## 已知限制
 

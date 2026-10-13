@@ -24,15 +24,57 @@ straight from the repository works too, and needs GitHub to be reachable:
 dsh plugin --profile web add github:27painter/dsh-moli
 ```
 
-Either way, restart DSH, then check the engine and fetch a page:
+> [!IMPORTANT]
+> **The npm package contains the plugin only — it does not bundle Moli.** It is 26 kB of JavaScript;
+> the `moli.exe` engine is a separate ~101 MB Rust binary with its own release process, so this
+> plugin installs alongside Moli rather than shipping it.
+>
+> **There is no npm package for Moli itself.** The names `moli` and `moli-cli` on the registry belong
+> to unrelated projects, and `@lexmount/moli` does not exist. Moli is distributed as prebuilt
+> binaries on [GitHub Releases](https://github.com/lexmount/moli/releases/latest) — do not install
+> the engine by guessing a package name.
+
+Either plugin route ends the same way. Restart DSH, then check the engine and fetch a page:
 
 ```
 moli_probe
 moli_fetch url=https://example.com dump=markdown
 ```
 
-Moli itself is a separate download. `moli_probe` reports whether it is present, and
-`moli_probe action=install` can fetch it. See [Installation](#installation).
+### Getting the Moli engine
+
+`moli_probe` reports whether it is present. If it is not, pick one of:
+
+**1. Let the plugin install it** — several download routes, and a SHA256 of what actually ran:
+
+```
+moli_probe action=install
+```
+
+**2. Official one-line installer** (Moli's own documented command):
+
+```powershell
+# Windows
+powershell -ExecutionPolicy ByPass -c "irm https://github.com/lexmount/moli/releases/latest/download/moli-installer.ps1 | iex"
+```
+
+```sh
+# Linux / macOS
+curl --proto '=https' --tlsv1.2 -fsSL https://github.com/lexmount/moli/releases/latest/download/moli-installer.sh | sh
+```
+
+**3. Direct binary, if you would rather not run an installer:**
+
+```powershell
+# pick the asset for your architecture from the releases page
+curl.exe -L -o moli.zip https://github.com/lexmount/moli/releases/latest/download/moli-x86_64-pc-windows-msvc.zip
+Expand-Archive moli.zip -DestinationPath "$env:LOCALAPPDATA\Moli" -Force
+```
+
+Those `releases/latest/download/...` URLs always resolve to the newest release, so they stay valid
+without pinning a version. See [Verifying the download](#verifying-the-download) to check what you
+got against GitHub's published digest, and [Manual install of Moli](#manual-install-of-moli) for the
+same commands in context.
 
 ## What it provides
 
