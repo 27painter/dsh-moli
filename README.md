@@ -127,6 +127,13 @@ does exist is GitHub's own per-asset `sha256` digest, readable from the release 
 (irm https://api.github.com/repos/lexmount/moli/releases/latest).assets | Select-Object name, digest
 ```
 
+For `v1.1.17` that reports, among others:
+
+```
+moli-installer.ps1                2,020  sha256:e002f7a6c174d78ae6ed7289aca9f5d3a62ab0b1f6e588606a80c0cb5d37964d
+moli-x86_64-pc-windows-msvc.zip  43.8 MB  sha256:5247309837b6eaf6e73bfa18f2a8d8d90473b9e2fe5cfcaaef57d7eee9b074c4
+```
+
 Compare it against the file you downloaded:
 
 ```powershell
@@ -135,7 +142,11 @@ Compare it against the file you downloaded:
 
 The plugin follows the same discipline: `moli_probe action=install` reports the SHA256 of the bytes it
 ran, and `expectedSha256` enforces a digest you supply. It does not invent a trusted default, because
-there is no upstream checksum to compare against.
+the digest is only meaningful when compared against the release page's own value.
+
+This is a checked property, not a claim: downloading `v1.1.17`'s installer through
+`downloadInstaller` reproduced `e002f7a6…964d` exactly — the same digest GitHub publishes — and
+re-hashing the file from disk matched too.
 
 ## Three design points
 

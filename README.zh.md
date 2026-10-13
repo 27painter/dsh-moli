@@ -117,6 +117,13 @@ Moli 的 README 没有记录任何校验和或签名，安装器也不发布校�
 (irm https://api.github.com/repos/lexmount/moli/releases/latest).assets | Select-Object name, digest
 ```
 
+`v1.1.17` 下这个命令会给出（节选）：
+
+```
+moli-installer.ps1                2,020  sha256:e002f7a6c174d78ae6ed7289aca9f5d3a62ab0b1f6e588606a80c0cb5d37964d
+moli-x86_64-pc-windows-msvc.zip  43.8 MB  sha256:5247309837b6eaf6e73bfa18f2a8d8d90473b9e2fe5cfcaaef57d7eee9b074c4
+```
+
 与你下载的文件比对：
 
 ```powershell
