@@ -1,5 +1,6 @@
 /** Host half of dsh-moli: expose the local `moli.exe` headless browser as callable tools. */
-import { findMoli, probe, runFetch } from './lib/moli.js';
+import { MANUAL_INSTALL, installMoli } from './lib/install.js';
+import { findMoli, moliCandidates, probe, runFetch } from './lib/moli.js';
 
 export const name = 'dsh-moli';
 export const inject = ['tools'];
@@ -88,7 +89,7 @@ const FETCH_OUTPUT_SCHEMA = {
   },
 };
 
-/** Result schema of `moli_probe`. */
+/** Result schema of `moli_probe`; covers both the probe and install actions. */
 const PROBE_OUTPUT_SCHEMA = {
   type: 'object',
   additionalProperties: true,
@@ -100,6 +101,14 @@ const PROBE_OUTPUT_SCHEMA = {
     sandboxTlsBlock: { type: 'boolean' },
     revocationBlock: { type: 'boolean' },
     detail: { type: 'string' },
+    ok: { type: 'boolean' },
+    error: { type: 'string' },
+    note: { type: 'string' },
+    installerSha256: { type: 'string' },
+    installerBytes: { type: 'integer' },
+    expectedSha256: { type: 'string' },
+    manualInstall: { type: 'object', additionalProperties: true },
+    searchedPaths: { type: 'array', items: { type: 'string' } },
   },
 };
 
@@ -140,8 +149,26 @@ function renderFetch(_args, value) {
  * @returns result content blocks.
  */
 function renderProbe(_args, value) {
+  // The install action reports `ok`/`error` instead of `installed`.
+  if (value.ok === true && typeof value.exe === 'string') {
+    return [{
+      type: 'text',
+      text: `Installed ${String(value.version)} at ${String(value.exe)} (installer SHA256 ${String(value.installerSha256)}, ${String(value.installerBytes)} bytes). Run moli_probe again to verify HTTPS.`,
+    }];
+  }
+  if (value.ok === false) {
+    const lines = [`Moli installation failed: ${String(value.error)}`];
+    if (typeof value.installerSha256 === 'string') lines.push(`Installer SHA256: ${value.installerSha256}`);
+    if (typeof value.note === 'string' && value.note !== '') lines.push(value.note);
+    lines.push(`Manual install — PowerShell: ${MANUAL_INSTALL.powershell}`);
+    lines.push(`Manual install — Linux/macOS: ${MANUAL_INSTALL.shell}`);
+    return [{ type: 'text', text: lines.join('\n') }];
+  }
   if (value.installed !== true) {
-    return [{ type: 'text', text: 'moli.exe was not found. Install Moli, or set the plugin config field `exePath`.' }];
+    const lines = ['moli.exe was not found. Call moli_probe with action "install", or set the plugin config field `exePath`.'];
+    lines.push(`Manual install — PowerShell: ${MANUAL_INSTALL.powershell}`);
+    lines.push(`Manual install — Linux/macOS: ${MANUAL_INSTALL.shell}`);
+    return [{ type: 'text', text: lines.join('\n') }];
   }
   const lines = [
     `${String(value.version).startsWith('moli') ? String(value.version) : `moli ${String(value.version)}`} at ${String(value.exe)}`,
@@ -169,14 +196,17 @@ function renderProbe(_args, value) {
  */
 export function apply(ctx, config) {
   const options = config ?? {};
-  const exe = findMoli(options.exePath);
+  // Mutable: a successful install resolves a path this process can use at once,
+  // without waiting for a restart to re-run discovery.
+  let cachedExe = findMoli(options.exePath);
+  const engine = () => cachedExe;
   const defaultTimeoutMs = options.defaultTimeoutMs ?? DEFAULTS.defaultTimeoutMs;
   const maxChars = options.maxChars ?? DEFAULTS.maxChars;
   const proxy = options.proxy ?? '';
   const insecureTls = options.insecureTls ?? DEFAULTS.insecureTls;
 
-  if (exe === undefined) {
-    ctx.logger?.warn?.('dsh-moli: moli.exe not found; the tools will report it as missing');
+  if (cachedExe === undefined) {
+    ctx.logger?.warn?.('dsh-moli: moli.exe not found; moli_probe can install it, or set config.exePath');
   }
 
   ctx.tools.register({
@@ -184,19 +214,21 @@ export function apply(ctx, config) {
     description: 'Fetch a URL with the local Moli headless browser: rendered HTML or Markdown, the semantic'
       + ' tree, a JSON envelope with status and final_url, a JavaScript expression result, a PNG screenshot, or a'
       + ' PDF. Use it for pages that need real rendering or JavaScript; prefer web_fetch for plain text. Screenshot'
-      + ' and pdf dumps require writeTo.',
+      + ' and pdf dumps require writeTo. If moli.exe is missing, run moli_probe with action "install" first.',
     parameters: FETCH_PARAMETERS,
     output: { schema: FETCH_OUTPUT_SCHEMA, render: renderFetch },
     isConcurrencySafe: args => args.writeTo === undefined || args.writeTo === '',
     async execute(args, exec) {
       if (exec.signal?.aborted === true) throw new Error('moli_fetch aborted before start');
+      const exe = engine();
       if (exe === undefined) {
         return {
           ok: false,
           url: args.url,
           error: 'moli.exe was not found',
           sandboxTlsBlock: false,
-          hint: 'Install Moli, or set the dsh-moli config field `exePath` to the absolute moli.exe path.',
+          hint: 'Call moli_probe with action "install" to download it, or set the dsh-moli config field `exePath` to the absolute moli.exe path.',
+          manualInstall: MANUAL_INSTALL,
         };
       }
       return runFetch({
@@ -211,13 +243,47 @@ export function apply(ctx, config) {
 
   ctx.tools.register({
     name: 'moli_probe',
-    description: 'Check the local Moli install: version, executable path, and whether HTTPS fetching works from'
-      + ' this process. Run it when a moli_fetch call fails unexpectedly or before relying on screenshots.',
-    parameters: {},
+    description: 'Report the local Moli install: version, executable path, and whether HTTPS fetching works from'
+      + ' this process. With action "install" it downloads and runs the official Moli installer instead, then'
+      + ' reports the executable and the SHA256 of the installer it ran. Use "install" only when moli_fetch'
+      + ' reports that moli.exe is missing; it downloads and executes third-party code.',
+    parameters: {
+      action: {
+        type: 'string',
+        enum: ['probe', 'install'],
+        description: '`probe` (default) only inspects; `install` downloads and runs the official release installer.',
+      },
+      expectedSha256: {
+        type: 'string',
+        description: 'With action "install": abort unless the downloaded installer matches this SHA256.',
+      },
+    },
     output: { schema: PROBE_OUTPUT_SCHEMA, render: renderProbe },
-    isConcurrencySafe: () => true,
-    async execute() {
-      if (exe === undefined) return { installed: false };
+    // Installation downloads and executes code, so it must never overlap itself.
+    isConcurrencySafe: args => args.action !== 'install',
+    async execute(args) {
+      // An explicit install request is honoured even when an engine already
+      // exists, so the action can also repair or upgrade an installation. Anything
+      // else only inspects, because installing downloads and runs code.
+      if (args.action === 'install') {
+        const outcome = await installMoli({
+          exePath: options.exePath,
+          expectedSha256: args.expectedSha256,
+          timeoutMs: options.installTimeoutMs ?? 180000,
+          locate: findMoli,
+          candidates: moliCandidates(options.exePath),
+        });
+        if (outcome.ok === true) {
+          cachedExe = outcome.exe;
+          ctx.logger?.info?.(`dsh-moli: installed ${String(outcome.version)} at ${String(outcome.exe)}`);
+        }
+        return outcome;
+      }
+
+      const exe = engine();
+      if (exe === undefined) {
+        return { installed: false, detail: 'moli.exe not found. Re-run with action "install" to download it.', manualInstall: MANUAL_INSTALL };
+      }
       const result = probe(exe, 'https://example.com', insecureTls);
       return {
         installed: true,
@@ -231,5 +297,5 @@ export function apply(ctx, config) {
     },
   });
 
-  ctx.logger?.info?.(`dsh-moli: registered moli_fetch and moli_probe (${exe ?? 'moli.exe missing'})`);
+  ctx.logger?.info?.(`dsh-moli: registered moli_fetch and moli_probe (${cachedExe ?? 'moli.exe missing'})`);
 }

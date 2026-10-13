@@ -40,6 +40,92 @@ moli_fetch url=https://example.com dump=screenshot writeTo=/绝对路径/a.png
 moli_fetch url=https://example.com dump=pdf        writeTo=/绝对路径/a.pdf
 ```
 
+## 安装
+
+插件装进某个 DSH profile。按你的机器情况选一条路。
+
+### 路线 A —— 已经装了 Moli
+
+不需要再装别的东西。插件自己会找到 `moli.exe`，两个工具立即可用。
+
+```powershell
+dsh plugin --profile web add github:27painter/dsh-moli
+```
+
+重启 DSH，然后用 `moli_probe` 确认。
+
+### 路线 B —— 还没装 Moli
+
+同样方式装插件、重启，然后让它替你把 Moli 拉下来：
+
+```powershell
+dsh plugin --profile web add github:27painter/dsh-moli
+# 重启 DSH，然后调用：
+moli_probe action=install
+```
+
+安装动作会**依次尝试多条下载路径**并逐条报告结果——因为受限网络可能把 release 主机整个挡掉。它会报告
+实际执行的字节的 SHA256，而 `expectedSha256` 能把这份报告变成强制校验门（见
+[校验下载](#校验下载)）。安装**只在调用明确要求时**发生，使用 `moli_fetch` 永远不会触发它。
+
+### 装进 desktop profile
+
+`dsh plugin --profile desktop …` 会被拒绝——desktop profile 归 Electron 应用所有。直接改它的
+`package.json`（加 `link:` 依赖**和** bundle 条目，再跑 `pnpm install`），或用应用内插件页
+（侧边栏 →**插件**→**添加插件**），那条路径同样走 pnpm。
+
+profile 插件需要两半都齐：依赖边 + `dsh.profile.bundles` 条目。缺一个 loader 就看不到它，而无法解析的
+bundle 会被**静默跳过**，只在 stderr 留一行 `skipping profile bundle …`。工具迟迟不出现时先找这行。
+
+## 手动安装 Moli
+
+自动路径都失败时（受限网络可能把 release 主机整个挡掉），自己装。下面是 Moli 官方文档里的命令。
+
+Windows（PowerShell）：
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://github.com/lexmount/moli/releases/latest/download/moli-installer.ps1 | iex"
+```
+
+Linux / macOS：
+
+```sh
+curl --proto '=https' --tlsv1.2 -fsSL https://github.com/lexmount/moli/releases/latest/download/moli-installer.sh | sh
+```
+
+官方也发布 Windows 直接二进制，不想跑安装器就用它：
+
+```powershell
+# 从 releases 页挑与你的架构匹配的资产
+curl.exe -L -o moli.zip https://github.com/lexmount/moli/releases/latest/download/moli-x86_64-pc-windows-msvc.zip
+Expand-Archive moli.zip -DestinationPath "$env:LOCALAPPDATA\Moli" -Force
+```
+
+装完若位置不常规，把插件指过去：
+
+```yaml
+config:
+  exePath: 'C:\path\to\moli.exe'
+```
+
+### 校验下载
+
+Moli 的 README 没有记录任何校验和或签名，安装器也不发布校验和文件。**存在的是 GitHub 自己给每个资产的
+`sha256` 摘要**，可以从 release API 读到：
+
+```powershell
+(irm https://api.github.com/repos/lexmount/moli/releases/latest).assets | Select-Object name, digest
+```
+
+与你下载的文件比对：
+
+```powershell
+(Get-FileHash .\moli-installer.ps1 -Algorithm SHA256).Hash.ToLower()
+```
+
+插件遵循同样的纪律：`moli_probe action=install` 会报告它实际执行的那份字节的 SHA256，而
+`expectedSha256` 能强制校验你提供的摘要。它**不会**编造一个可信默认值——因为上游根本没有校验和可比。
+
 ## 三个设计要点
 
 1. **输出走文件描述符，不走管道。** DSH 的 Windows 沙箱禁止子进程打开继承的命名管道，
