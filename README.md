@@ -259,6 +259,10 @@ capabilities always visible to the model.
 
 Works on **Windows, Linux and macOS** (x64 / arm64).
 
+> **Linux and macOS support was contributed by [@nd002723](https://github.com/nd002723)** in
+> [PR #1](https://github.com/27painter/dsh-moli/pull/1): engine discovery in the standard POSIX
+> locations, the `sh` installer route, and the per-platform gating of the PowerShell paths.
+
 - **Windows** — the engine is located at the official installer paths (`%LOCALAPPDATA%\Moli\bin\moli.exe`,
   `%USERPROFILE%\.local\bin\moli.exe`) with a recursive scan of `%LOCALAPPDATA%\Moli` as a fallback.
   `moli_probe action=install` runs the official PowerShell installer.
@@ -288,12 +292,10 @@ installation under a versioned subdirectory is still found.
 
 ## Known limitations
 
-- **Linux and macOS are implemented but not tested by the author.** The POSIX paths were contributed
-  in [PR #1](https://github.com/27painter/dsh-moli/pull/1) and reviewed, but the person who maintains
-  this repository is a student with **no macOS or Linux machine**, so those code paths have never been
-  run against a real POSIX host. Windows is the only platform verified here: the executable discovery,
-  the file-descriptor workaround and the Schannel notes are Windows-specific observations.
-  **If something fails on Linux or macOS, please open an
+- **Linux and macOS are not tested by the maintainer.** See
+  [Platform support](#platform-support) for what was contributed and by whom. The maintainer is a
+  student with no macOS or Linux machine, so those paths have never run on a real POSIX host; Windows
+  is the only platform verified here. **If something fails on Linux or macOS, please open an
   [issue](https://github.com/27painter/dsh-moli/issues) with the error output** — that is the only way
   these paths get fixed.
 - **Moli itself is not bundled.** Install it separately or let `moli_probe action=install` fetch it.

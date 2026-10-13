@@ -240,6 +240,10 @@ Moli 仓库自带官方 agent skill：[`moli-webfetch`](https://github.com/lexmo
 
 支持 **Windows、Linux、macOS**（x64 / arm64）。
 
+> **Linux 与 macOS 支持由 [@nd002723](https://github.com/nd002723) 贡献**，见
+> [PR #1](https://github.com/27painter/dsh-moli/pull/1)：POSIX 标准位置的引擎探测、`sh` 安装器路径，
+> 以及把 PowerShell 相关路径按平台门控。
+
 - **Windows** —— 引擎在官方安装位置查找（`%LOCALAPPDATA%\Moli\bin\moli.exe` 与 `%USERPROFILE%\.local\bin\moli.exe`），
   并以 `%LOCALAPPDATA%\Moli` 递归扫描兜底；`moli_probe action=install` 走官方 PowerShell 安装器。
 - **Linux / macOS** —— 引擎在标准位置（`~/.local/bin/moli`、`~/.local/share/moli/bin/moli`、
@@ -267,11 +271,9 @@ Moli 仓库自带官方 agent skill：[`moli-webfetch`](https://github.com/lexmo
 
 ## 已知限制
 
-- **Linux 与 macOS 已实现，但作者没有测过。** POSIX 相关代码来自
-  [PR #1](https://github.com/27painter/dsh-moli/pull/1)，已做代码审查，但本仓库维护者是一名**没有
-  macOS / Linux 电脑**的大学生，所以这些分支从未在真实的 POSIX 主机上运行过。这里唯一验证过的平台是
-  Windows：可执行文件探测、文件描述符绕坑与 Schannel 说明都是 Windows 上的观察。
-  **如果在 Linux 或 macOS 上出问题，请带上报错信息开
+- **Linux 与 macOS 未由维护者验证。** 谁贡献了什么，见[平台支持](#平台支持)。维护者是一名**没有
+  macOS / Linux 电脑**的大学生，所以这些路径从未在真实的 POSIX 主机上运行过；这里唯一验证过的平台是
+  Windows。**如果在 Linux 或 macOS 上出问题，请带上报错信息开
   [issue](https://github.com/27painter/dsh-moli/issues)**——那是这些路径能被打通的唯一途径。
 - **不包含 Moli 本体。** 需自行安装，或让 `moli_probe action=install` 替你拉取。
 - **只封装了 `fetch`。** `moli serve`（CDP/WebDriver 服务器）与 `moli import`（会话导入）尚未做成工具。
