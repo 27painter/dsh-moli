@@ -267,8 +267,12 @@ Moli 仓库自带官方 agent skill：[`moli-webfetch`](https://github.com/lexmo
 
 ## 已知限制
 
-- **面向 Windows。** 开发与验证都在 Windows 上；可执行文件探测、文件描述符绕坑、Schannel 说明都
-  与 Windows 相关。移植到 POSIX 没有障碍，但未经验证。
+- **Linux 与 macOS 已实现，但作者没有测过。** POSIX 相关代码来自
+  [PR #1](https://github.com/27painter/dsh-moli/pull/1)，已做代码审查，但本仓库维护者是一名**没有
+  macOS / Linux 电脑**的大学生，所以这些分支从未在真实的 POSIX 主机上运行过。这里唯一验证过的平台是
+  Windows：可执行文件探测、文件描述符绕坑与 Schannel 说明都是 Windows 上的观察。
+  **如果在 Linux 或 macOS 上出问题，请带上报错信息开
+  [issue](https://github.com/27painter/dsh-moli/issues)**——那是这些路径能被打通的唯一途径。
 - **不包含 Moli 本体。** 需自行安装，或让 `moli_probe action=install` 替你拉取。
 - **只封装了 `fetch`。** `moli serve`（CDP/WebDriver 服务器）与 `moli import`（会话导入）尚未做成工具。
 - **不支持单次取消。** 引擎是同步执行的，被中断的回合无法中途终止抓取；已在进行的调用会跑完并

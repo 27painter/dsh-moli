@@ -1,6 +1,6 @@
 {
   "name": "dsh-moli",
-  "version": "1.0.6",
+  "version": "1.1.0",
   "type": "module",
   "description": "DeepSeek Harness tools for the local Moli headless browser: rendered fetches, markdown, semantic trees, screenshots, and PDFs.",
   "license": "MIT",
@@ -26,7 +26,7 @@
     "url": "https://github.com/27painter/dsh-moli/issues"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=20.12"
   },
   "publishConfig": {
     "registry": "https://registry.npmjs.org",

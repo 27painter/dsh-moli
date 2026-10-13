@@ -288,9 +288,14 @@ installation under a versioned subdirectory is still found.
 
 ## Known limitations
 
-- **Windows-only targeting.** Developed and tested on Windows; the executable discovery, the
-  file-descriptor workaround, and the Schannel notes are Windows-specific. Nothing prevents a
-  POSIX port, but it is untested.
+- **Linux and macOS are implemented but not tested by the author.** The POSIX paths were contributed
+  in [PR #1](https://github.com/27painter/dsh-moli/pull/1) and reviewed, but the person who maintains
+  this repository is a student with **no macOS or Linux machine**, so those code paths have never been
+  run against a real POSIX host. Windows is the only platform verified here: the executable discovery,
+  the file-descriptor workaround and the Schannel notes are Windows-specific observations.
+  **If something fails on Linux or macOS, please open an
+  [issue](https://github.com/27painter/dsh-moli/issues) with the error output** — that is the only way
+  these paths get fixed.
 - **Moli itself is not bundled.** Install it separately or let `moli_probe action=install` fetch it.
 - **Only `fetch` is wrapped.** `moli serve` (CDP/WebDriver server) and `moli import` (session
   import) are not exposed as tools yet.

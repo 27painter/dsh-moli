@@ -76,7 +76,7 @@ check('nothing ran', !existsSync(marker));
 console.log('\n3. matching checksum runs the installer');
 const good = await installMoli({ installerUrl, expectedSha256: installerSha, timeoutMs: 60000, locate: () => undefined });
 check('installer executed', existsSync(marker), existsSync(marker) ? readFileSync(marker, 'utf8').trim() : 'no marker');
-check('post-run discovery reported honestly', good.ok === false && /no working moli\.exe was found/u.test(String(good.error)), String(good.error).slice(0, 70));
+check('post-run discovery reported honestly', good.ok === false && /no working moli binary was found/u.test(String(good.error)), String(good.error).slice(0, 70));
 check('digest survived', good.installerSha256 === installerSha);
 check('manual fallback offered', typeof good.manualInstall?.powershell === 'string');
 
