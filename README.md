@@ -263,12 +263,23 @@ Works on **Windows, Linux and macOS** (x64 / arm64).
 > [PR #1](https://github.com/27painter/dsh-moli/pull/1): engine discovery in the standard POSIX
 > locations, the `sh` installer route, and the per-platform gating of the PowerShell paths.
 
+| Platform | Status |
+|---|---|
+| **Windows** | Verified by the maintainer |
+| **Linux** | Verified by the contributor on Ubuntu 24.04 LTS, Node v24.21.0, DSH 0.2.1-alpha.2, dsh-moli 1.1.0, Moli 1.1.17 |
+| **macOS** | Implemented, not yet verified on a real host |
+
 - **Windows** — the engine is located at the official installer paths (`%LOCALAPPDATA%\Moli\bin\moli.exe`,
   `%USERPROFILE%\.local\bin\moli.exe`) with a recursive scan of `%LOCALAPPDATA%\Moli` as a fallback.
   `moli_probe action=install` runs the official PowerShell installer.
 - **Linux / macOS** — the engine is found in the standard locations (`~/.local/bin/moli`,
   `~/.local/share/moli/bin/moli`, `~/.local/share/moli/moli`, `~/.moli/bin/moli`) and on `$PATH`.
   `moli_probe action=install` runs the official `moli-installer.sh` via `sh`.
+
+On Linux, `moli_probe` discovered `~/.local/bin/moli` unaided, and `moli_fetch` rendered a
+region-gated storefront end to end — through a local forward proxy, with a Netscape `cookieFile` —
+returning a 500+ KB page whose final URL carried the cookie-driven query parameters. That run
+exercised the proxy download route as well as the engine paths.
 
 ## Configuration
 
@@ -292,10 +303,10 @@ installation under a versioned subdirectory is still found.
 
 ## Known limitations
 
-- **Linux and macOS are not tested by the maintainer.** See
-  [Platform support](#platform-support) for what was contributed and by whom. The maintainer is a
-  student with no macOS or Linux machine, so those paths have never run on a real POSIX host; Windows
-  is the only platform verified here. **If something fails on Linux or macOS, please open an
+- **macOS is untested, and Linux was tested by the contributor rather than the maintainer.** The
+  maintainer is a student with no macOS or Linux machine, so Linux was verified independently by
+  [@nd002723](https://github.com/nd002723) on Ubuntu 24.04 (see [Platform support](#platform-support));
+  macOS has not been run on a real host at all. **If something fails on either, please open an
   [issue](https://github.com/27painter/dsh-moli/issues) with the error output** — that is the only way
   these paths get fixed.
 - **Moli itself is not bundled.** Install it separately or let `moli_probe action=install` fetch it.

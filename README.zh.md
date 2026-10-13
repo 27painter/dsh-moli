@@ -244,10 +244,20 @@ Moli 仓库自带官方 agent skill：[`moli-webfetch`](https://github.com/lexmo
 > [PR #1](https://github.com/27painter/dsh-moli/pull/1)：POSIX 标准位置的引擎探测、`sh` 安装器路径，
 > 以及把 PowerShell 相关路径按平台门控。
 
+| 平台 | 状态 |
+|---|---|
+| **Windows** | 由维护者验证 |
+| **Linux** | 由贡献者在 Ubuntu 24.04 LTS、Node v24.21.0、DSH 0.2.1-alpha.2、dsh-moli 1.1.0、Moli 1.1.17 上验证通过 |
+| **macOS** | 已实现，尚未在真机验证 |
+
 - **Windows** —— 引擎在官方安装位置查找（`%LOCALAPPDATA%\Moli\bin\moli.exe` 与 `%USERPROFILE%\.local\bin\moli.exe`），
   并以 `%LOCALAPPDATA%\Moli` 递归扫描兜底；`moli_probe action=install` 走官方 PowerShell 安装器。
 - **Linux / macOS** —— 引擎在标准位置（`~/.local/bin/moli`、`~/.local/share/moli/bin/moli`、
   `~/.local/share/moli/moli`、`~/.moli/bin/moli`）与 `$PATH` 中查找；`moli_probe action=install` 通过 `sh` 执行官方 `moli-installer.sh`。
+
+在 Linux 上，`moli_probe` 无需干预就找到了 `~/.local/bin/moli`；`moli_fetch` 端到端渲染了一个地区限制的
+电商站——经由本地正向代理、并带上 Netscape 格式的 `cookieFile`——返回 500+ KB 的页面，最终 URL 带上了
+cookie 驱动的查询参数。那次实测同时覆盖了代理下载路由与引擎探测路径。
 
 ## 配置
 
@@ -271,9 +281,9 @@ Moli 仓库自带官方 agent skill：[`moli-webfetch`](https://github.com/lexmo
 
 ## 已知限制
 
-- **Linux 与 macOS 未由维护者验证。** 谁贡献了什么，见[平台支持](#平台支持)。维护者是一名**没有
-  macOS / Linux 电脑**的大学生，所以这些路径从未在真实的 POSIX 主机上运行过；这里唯一验证过的平台是
-  Windows。**如果在 Linux 或 macOS 上出问题，请带上报错信息开
+- **macOS 未经验证，Linux 是由贡献者而非维护者验证的。** 维护者是一名**没有 macOS / Linux 电脑**的
+  大学生；Linux 由 [@nd002723](https://github.com/nd002723) 在 Ubuntu 24.04 上独立验证通过（见
+  [平台支持](#平台支持)），而 macOS 从未在真机运行过。**任一平台出问题，都请带上报错信息开
   [issue](https://github.com/27painter/dsh-moli/issues)**——那是这些路径能被打通的唯一途径。
 - **不包含 Moli 本体。** 需自行安装，或让 `moli_probe action=install` 替你拉取。
 - **只封装了 `fetch`。** `moli serve`（CDP/WebDriver 服务器）与 `moli import`（会话导入）尚未做成工具。
