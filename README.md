@@ -58,17 +58,57 @@ dsh plugin --profile web add github:27painter/dsh-moli
 ```
 
 > [!IMPORTANT]
-> **This package is the plugin only — it does not include the Moli engine.** It is 26 kB of
-> JavaScript; `moli.exe` is a separate ~101 MB Rust binary with its own release process. Installing the
-> plugin does not install Moli, and `moli_fetch` reports that the engine is missing until you install
-> it.
+> **The npm package is the plugin only — it does not contain the Moli engine.**
 >
-> **There is no npm package for the engine.** The registry names `moli` and `moli-cli` belong to
+> The npm tarball is 26 kB: eight JavaScript and text files. `moli.exe` is a separate ~101 MB compiled
+> Rust binary, built and released by the Moli project on its own schedule.
+>
+> **Why it cannot be bundled:**
+>
+> - **Size.** The engine is roughly 4,000× the plugin. Every install and every plugin update would
+>   carry a browser.
+> - **Ownership.** Moli is `lexmount/moli` under its own MIT copyright. Redistributing its binary
+>   through this package would mean re-publishing someone else's artifact as our own.
+> - **Platforms.** The engine ships per OS and per architecture — Windows/Linux/macOS × x64/arm64.
+>   Bundling would pin one build into every user's install.
+> - **Versions.** The plugin must work with whatever Moli version a user has, including Moli releases
+>   that appear after the plugin was published. Bundling would lock the pair together.
+>
+> **There is no npm package for the engine either.** The registry names `moli` and `moli-cli` belong to
 > unrelated projects, and `@lexmount/moli` does not exist. Moli ships as prebuilt binaries on
 > [GitHub Releases](https://github.com/lexmount/moli/releases/latest) — do not install the engine by
 > guessing a package name.
 
-Either route ends the same way. Restart DSH, then check the engine and fetch a page:
+## The two situations after installing
+
+The two download routes above install the same thing. What differs is whether Moli is already on the
+machine — and that decides whether you are finished or have one more step.
+
+### Situation A — Moli is already installed: nothing else to do
+
+The plugin discovers `moli.exe` on its own and both tools work immediately. Just restart DSH and
+confirm:
+
+```
+moli_probe
+```
+
+If the reported version looks right, you are done.
+
+### Situation B — Moli is not installed yet: fetch the engine too
+
+`moli_fetch` will keep reporting a missing engine until you install one. Do that with either of:
+
+```
+moli_probe action=install          # let the plugin fetch it
+```
+
+```powershell
+# or run Moli's own installer yourself
+powershell -ExecutionPolicy ByPass -c "irm https://github.com/lexmount/moli/releases/latest/download/moli-installer.ps1 | iex"
+```
+
+Then confirm with `moli_probe` and fetch a page:
 
 ```
 moli_probe

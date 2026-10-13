@@ -53,14 +53,53 @@ dsh plugin --profile web add github:27painter/dsh-moli
 ```
 
 > [!IMPORTANT]
-> **这个包只有插件，不含 Moli 引擎。** 它是 26 kB 的 JavaScript；`moli.exe` 是另一个约 101 MB 的 Rust
-> 二进制、有自己的发布流程。装插件**不会**顺带装上 Moli，在你装引擎之前 `moli_fetch` 会一直报"引擎缺失"。
+> **npm 包只有插件，不含 Moli 引擎。**
 >
-> **引擎没有 npm 包。** registry 上的 `moli` 和 `moli-cli` 属于无关项目，`@lexmount/moli` 并不存在。
-> Moli 以预编译二进制形式发布在
+> npm tarball 是 26 kB：八个 JavaScript 与文本文件。`moli.exe` 是另外的东西——约 101 MB 的 Rust 编译
+> 产物，由 Moli 项目按自己的节奏构建和发布。
+>
+> **为什么不能打包进来：**
+>
+> - **体积。** 引擎约为插件的 4,000 倍。每次安装、每次插件更新都要顺带搬运一个浏览器。
+> - **归属。** Moli 是 `lexmount/moli`，版权属于它自己的 MIT 署名。把它家的二进制经由本包再分发，等于
+>   把别人的产物当自己的发布。
+> - **平台。** 引擎按操作系统与架构分别发布——Windows/Linux/macOS × x64/arm64。打包进来等于把某一个
+>   构建方式钉死给所有用户。
+> - **版本。** 插件要能配合用户手上**任意** Moli 版本工作，包括插件发布之后才出现的 Moli 新版本。
+>   打包会把两者的版本绑死。
+>
+> **引擎同样没有 npm 包。** registry 上的 `moli` 和 `moli-cli` 属于无关项目，`@lexmount/moli` 并不
+> 存在。Moli 以预编译二进制形式发布在
 > [GitHub Releases](https://github.com/lexmount/moli/releases/latest)——**不要靠猜包名去装引擎**。
 
-两种方式都要重启 DSH，然后自检并抓一个页面：
+## 装好之后的两种情形
+
+上面两条下载路线装的是同一个东西。区别在于**你的机器上有没有 Moli**——这决定你是就此完事，还是还差一步。
+
+### 情形 A —— 已经装了 Moli：不用再做别的
+
+插件自己会找到 `moli.exe`，两个工具立即可用。重启 DSH 然后确认：
+
+```
+moli_probe
+```
+
+如果报出来的版本正常，就结束了。
+
+### 情形 B —— 还没装 Moli：把引擎也拉下来
+
+在你装上引擎之前，`moli_fetch` 会一直报"引擎缺失"。用下面任一种装上：
+
+```
+moli_probe action=install          # 让插件替你拉
+```
+
+```powershell
+# 或者自己跑 Moli 官方的安装器
+powershell -ExecutionPolicy ByPass -c "irm https://github.com/lexmount/moli/releases/latest/download/moli-installer.ps1 | iex"
+```
+
+然后用 `moli_probe` 确认并抓一个页面：
 
 ```
 moli_probe
