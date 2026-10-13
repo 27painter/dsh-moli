@@ -1,9 +1,38 @@
 # dsh-moli
 
+[![npm version](https://img.shields.io/npm/v/dsh-moli)](https://www.npmjs.com/package/dsh-moli)
+[![license](https://img.shields.io/npm/l/dsh-moli)](LICENSE)
+
 Expose a locally installed [Moli](https://github.com/lexmount/moli) (`moli.exe`, a Rust headless
 browser for AI agents) as **DeepSeek Harness tools**, so an agent can call it instead of shelling out.
 
 English | [中文](README.zh.md)
+
+## Quick start
+
+Published on npm as [`dsh-moli`](https://www.npmjs.com/package/dsh-moli):
+
+```powershell
+dsh plugin --profile web add dsh-moli
+```
+
+That is the recommended route: it resolves through the npm registry, so it also works where GitHub
+is slow or unreachable, and DSH's install dialog can fall back to a regional mirror. Installing
+straight from the repository works too, and needs GitHub to be reachable:
+
+```powershell
+dsh plugin --profile web add github:27painter/dsh-moli
+```
+
+Either way, restart DSH, then check the engine and fetch a page:
+
+```
+moli_probe
+moli_fetch url=https://example.com dump=markdown
+```
+
+Moli itself is a separate download. `moli_probe` reports whether it is present, and
+`moli_probe action=install` can fetch it. See [Installation](#installation).
 
 ## What it provides
 
@@ -54,6 +83,13 @@ The plugin is installed into a DSH profile. Pick the route that matches your mac
 Nothing else to fetch. The plugin finds `moli.exe` on its own and both tools work immediately.
 
 ```powershell
+dsh plugin --profile web add dsh-moli
+```
+
+Install from the repository instead if you prefer tracking the source, or if the registry is
+unreachable for you:
+
+```powershell
 dsh plugin --profile web add github:27painter/dsh-moli
 ```
 
@@ -64,7 +100,7 @@ Restart DSH, then confirm with `moli_probe`.
 Install the plugin the same way, restart, then let it fetch Moli for you:
 
 ```powershell
-dsh plugin --profile web add github:27painter/dsh-moli
+dsh plugin --profile web add dsh-moli
 # restart DSH, then call:
 moli_probe action=install
 ```

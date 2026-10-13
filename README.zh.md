@@ -4,6 +4,31 @@
 
 [English](README.md) | 中文
 
+## 快速开始
+
+已发布到 npm：[`dsh-moli`](https://www.npmjs.com/package/dsh-moli)
+
+```powershell
+dsh plugin --profile web add dsh-moli
+```
+
+**推荐走这条**：它经 npm registry 解析，所以在 GitHub 慢或不通的网络里照样能装，而且 DSH 的安装对话框能
+回退到国内镜像。直接从仓库装也可以，但需要 GitHub 可达：
+
+```powershell
+dsh plugin --profile web add github:27painter/dsh-moli
+```
+
+两种方式都要重启 DSH，然后自检并抓一个页面：
+
+```
+moli_probe
+moli_fetch url=https://example.com dump=markdown
+```
+
+Moli 本体是另外下载的。`moli_probe` 会报告它是否在场，`moli_probe action=install` 可以替你拉取。
+详见[安装](#安装)。
+
 ## 与 Moli 官方 agent skill 的关系
 
 Moli 仓库自带官方 agent skill：[`moli-webfetch`](https://github.com/lexmount/moli/tree/main/skills/moli-webfetch)、
@@ -49,6 +74,12 @@ moli_fetch url=https://example.com dump=pdf        writeTo=/绝对路径/a.pdf
 不需要再装别的东西。插件自己会找到 `moli.exe`，两个工具立即可用。
 
 ```powershell
+dsh plugin --profile web add dsh-moli
+```
+
+若你更想跟踪源码，或 registry 对你不可达，改从仓库装：
+
+```powershell
 dsh plugin --profile web add github:27painter/dsh-moli
 ```
 
@@ -59,7 +90,7 @@ dsh plugin --profile web add github:27painter/dsh-moli
 同样方式装插件、重启，然后让它替你把 Moli 拉下来：
 
 ```powershell
-dsh plugin --profile web add github:27painter/dsh-moli
+dsh plugin --profile web add dsh-moli
 # 重启 DSH，然后调用：
 moli_probe action=install
 ```
