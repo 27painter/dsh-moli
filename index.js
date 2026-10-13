@@ -27,7 +27,17 @@ const DEFAULTS = {
   insecureTls: true,
 };
 
-/** Parameter schema of `moli_fetch`, in the registry's DSL. */
+/**
+ * Parameter schema of `moli_fetch`.
+ *
+ * The two schema layers follow DIFFERENT rules, which is easy to get wrong:
+ * - A parameter spec uses the author DSL, where a property-level `required: true`
+ *   is correct. `parameterSchemaSpecToJsonSchema` hoists it into an object-level
+ *   `required` array and strips the flag.
+ * - A raw output schema is validated as-is, so `required` there must already be an
+ *   object-level array of names. A property-level `required: true` makes the
+ *   registry reject the whole tool with `JsonSchemaError`.
+ */
 const FETCH_PARAMETERS = {
   url: { type: 'string', required: true, description: 'Absolute http:// or https:// URL to fetch.' },
   dump: {
@@ -65,13 +75,20 @@ const FETCH_PARAMETERS = {
   cookieFile: { type: 'string', description: 'Netscape/curl cookie-jar file to send.' },
 };
 
+/**
+ * `required` is an object-level array of property names in the registry's schema
+ * subset for a RAW schema. A property-level `required: true` belongs to the
+ * parameter DSL instead; here it makes the registry reject the tool.
+ */
+
 /** Result schema of `moli_fetch`; only `ok` and `url` are always present. */
 const FETCH_OUTPUT_SCHEMA = {
   type: 'object',
   additionalProperties: true,
+  required: ['ok', 'url'],
   properties: {
-    ok: { type: 'boolean', required: true },
-    url: { type: 'string', required: true },
+    ok: { type: 'boolean' },
+    url: { type: 'string' },
     kind: { type: 'string', enum: ['text', 'binary'] },
     dump: { type: 'string' },
     content: { type: 'string' },
@@ -93,8 +110,9 @@ const FETCH_OUTPUT_SCHEMA = {
 const PROBE_OUTPUT_SCHEMA = {
   type: 'object',
   additionalProperties: true,
+  required: ['installed'],
   properties: {
-    installed: { type: 'boolean', required: true },
+    installed: { type: 'boolean' },
     exe: { type: 'string' },
     version: { type: 'string' },
     httpsOk: { type: 'boolean' },
