@@ -3,38 +3,72 @@
 [![npm version](https://img.shields.io/npm/v/dsh-moli)](https://www.npmjs.com/package/dsh-moli)
 [![license](https://img.shields.io/npm/l/dsh-moli)](LICENSE)
 
-Expose a locally installed [Moli](https://github.com/lexmount/moli) (`moli.exe`, a Rust headless
-browser for AI agents) as **DeepSeek Harness tools**, so an agent can call it instead of shelling out.
+**Two tools that let a DeepSeek Harness agent drive a real headless browser.** They wrap
+[Moli](https://github.com/lexmount/moli) — a Rust headless browser built for AI agents — so an agent can
+read pages that only exist after JavaScript runs, and can produce pictures of them.
 
 English | [中文](README.zh.md)
 
-## Quick start
+## What it does, and when you want it
 
-Published on npm as [`dsh-moli`](https://www.npmjs.com/package/dsh-moli):
+A plain HTTP fetch returns the HTML the server sent. That is enough for articles, docs and APIs, and
+DSH already covers it with `web_fetch`. It is not enough for anything a browser has to build:
+
+- **Single-page apps** — a client-rendered news site, dashboard or docs site. The response is an empty
+  shell; the content appears only after scripts run.
+- **Logins and consent walls** — a page that needs a session or cookie before it shows anything.
+- **Pictures** — a screenshot to see what a page looks like, or a PDF to keep.
+- **One value from deep inside a page** — a price, a count, a title, read with a selector instead of
+  pulling the whole document.
+
+For those jobs this plugin gives the agent two tools:
+
+| Tool | What it does |
+|---|---|
+| `moli_fetch` | Renders a URL and returns Markdown, HTML, a semantic tree, or a JSON envelope carrying the HTTP status; evaluates a JavaScript expression; writes a PNG screenshot or a PDF |
+| `moli_probe` | Reports whether the engine is installed, which version, and whether HTTPS works — and installs Moli when it is missing |
+
+The practical question is whether the agent needs the page as a **browser** would see it. If a plain
+fetch already returns the text you want, `web_fetch` is lighter and faster.
+
+```
+  agent ──moli_fetch──▶ dsh-moli plugin ──spawns──▶ moli.exe
+                              ▲                         │
+                              │                    renders the page,
+                              │                    runs its JavaScript
+                              │                         │
+                              └──markdown / json / png / pdf◀┘
+```
+
+## Install
+
+Two routes. Both install the same plugin; pick by what your network reaches.
+
+**Route 1 — from npm (recommended).** Resolves through the npm registry, so it works where GitHub is
+slow or blocked, and DSH's install dialog can fall back to a regional mirror:
 
 ```powershell
 dsh plugin --profile web add dsh-moli
 ```
 
-That is the recommended route: it resolves through the npm registry, so it also works where GitHub
-is slow or unreachable, and DSH's install dialog can fall back to a regional mirror. Installing
-straight from the repository works too, and needs GitHub to be reachable:
+**Route 2 — straight from the repository.** Tracks the source directly; needs GitHub to be reachable:
 
 ```powershell
 dsh plugin --profile web add github:27painter/dsh-moli
 ```
 
 > [!IMPORTANT]
-> **The npm package contains the plugin only — it does not bundle Moli.** It is 26 kB of JavaScript;
-> the `moli.exe` engine is a separate ~101 MB Rust binary with its own release process, so this
-> plugin installs alongside Moli rather than shipping it.
+> **This package is the plugin only — it does not include the Moli engine.** It is 26 kB of
+> JavaScript; `moli.exe` is a separate ~101 MB Rust binary with its own release process. Installing the
+> plugin does not install Moli, and `moli_fetch` reports that the engine is missing until you install
+> it.
 >
-> **There is no npm package for Moli itself.** The names `moli` and `moli-cli` on the registry belong
-> to unrelated projects, and `@lexmount/moli` does not exist. Moli is distributed as prebuilt
-> binaries on [GitHub Releases](https://github.com/lexmount/moli/releases/latest) — do not install
-> the engine by guessing a package name.
+> **There is no npm package for the engine.** The registry names `moli` and `moli-cli` belong to
+> unrelated projects, and `@lexmount/moli` does not exist. Moli ships as prebuilt binaries on
+> [GitHub Releases](https://github.com/lexmount/moli/releases/latest) — do not install the engine by
+> guessing a package name.
 
-Either plugin route ends the same way. Restart DSH, then check the engine and fetch a page:
+Either route ends the same way. Restart DSH, then check the engine and fetch a page:
 
 ```
 moli_probe
@@ -43,15 +77,15 @@ moli_fetch url=https://example.com dump=markdown
 
 ### Getting the Moli engine
 
-`moli_probe` reports whether it is present. If it is not, pick one of:
+`moli_probe` reports whether the engine is present. If it is not, pick one of:
 
-**1. Let the plugin install it** — several download routes, and a SHA256 of what actually ran:
+**1. Let the plugin install it** — tries several download routes and reports a SHA256 of what it ran:
 
 ```
 moli_probe action=install
 ```
 
-**2. Official one-line installer** (Moli's own documented command):
+**2. Official one-line installer** (Moli's own documented commands):
 
 ```powershell
 # Windows
@@ -63,125 +97,7 @@ powershell -ExecutionPolicy ByPass -c "irm https://github.com/lexmount/moli/rele
 curl --proto '=https' --tlsv1.2 -fsSL https://github.com/lexmount/moli/releases/latest/download/moli-installer.sh | sh
 ```
 
-**3. Direct binary, if you would rather not run an installer:**
-
-```powershell
-# pick the asset for your architecture from the releases page
-curl.exe -L -o moli.zip https://github.com/lexmount/moli/releases/latest/download/moli-x86_64-pc-windows-msvc.zip
-Expand-Archive moli.zip -DestinationPath "$env:LOCALAPPDATA\Moli" -Force
-```
-
-Those `releases/latest/download/...` URLs always resolve to the newest release, so they stay valid
-without pinning a version. See [Verifying the download](#verifying-the-download) to check what you
-got against GitHub's published digest, and [Manual install of Moli](#manual-install-of-moli) for the
-same commands in context.
-
-## What it provides
-
-| Tool | Purpose |
-|---|---|
-| `moli_fetch` | Fetch a URL and return rendered HTML, Markdown, the semantic tree, or a JSON envelope (`status`, `final_url`); evaluate a JavaScript expression; write a PNG screenshot or a PDF |
-| `moli_probe` | Report the engine path and version and whether HTTPS works; with `action: "install"`, download and install Moli first |
-
-`moli_fetch` parameters: `url` (required), `dump`, `writeTo`, `eval`, `wait`, `waitSelector`,
-`delayMs`, `timeoutMs`, `maxChars`, `headers`, `userAgent`, `layout`, `scrollbars`, `noJs`,
-`noCss`, `resources`, `withFrames`, `insecureTls`, `profileDir`, `cookieFile`.
-
-```
-moli_fetch url=https://example.com dump=markdown            # token-efficient text
-moli_fetch url=https://example.com dump=semantic_tree_text   # nodes with backend ids
-moli_fetch url=https://example.com eval="document.title"     # one computed value
-moli_fetch url=https://example.com dump=screenshot writeTo=/abs/path/a.png
-moli_fetch url=https://example.com dump=pdf        writeTo=/abs/path/a.pdf
-```
-
-## Relationship to Moli's own agent skills
-
-Moli ships official agent skills in its repository — [`moli-webfetch`](https://github.com/lexmount/moli/tree/main/skills/moli-webfetch),
-[`moli-websearch`](https://github.com/lexmount/moli/tree/main/skills/moli-websearch), and
-[`moli-cdp-server`](https://github.com/lexmount/moli/tree/main/skills/moli-cdp-server) — and their
-README's quick start is to have an agent install them. If your agent loads skills, the simplest path
-is to point it at those; they are maintained upstream and cover web search and a CDP server too.
-
-This plugin exists because it is a different trade-off, not a replacement:
-
-- **Always-on tool schemas instead of an on-demand skill.** The tools are registered at Host startup,
-  so the model sees them every turn with no discovery step.
-- **DSH-specific failure handling.** The three traps below (sandbox pipe capture, UTF-16 mangling of
-  binary output, bare-specifier resolution for a `link:`ed plugin) plus sandbox/revocation/proxy
-  classification are solved here, because they are DSH-on-Windows problems.
-- **Smaller surface.** Only `fetch` is wrapped; the official skills also cover web search and the CDP
-  server, which this plugin does not.
-
-Both can coexist: install the skills if you want upstream coverage, keep this plugin if you want the
-capabilities always visible to the model.
-
-## Installation
-
-The plugin is installed into a DSH profile. Pick the route that matches your machine.
-
-### Route A — Moli is already installed
-
-Nothing else to fetch. The plugin finds `moli.exe` on its own and both tools work immediately.
-
-```powershell
-dsh plugin --profile web add dsh-moli
-```
-
-Install from the repository instead if you prefer tracking the source, or if the registry is
-unreachable for you:
-
-```powershell
-dsh plugin --profile web add github:27painter/dsh-moli
-```
-
-Restart DSH, then confirm with `moli_probe`.
-
-### Route B — Moli is not installed yet
-
-Install the plugin the same way, restart, then let it fetch Moli for you:
-
-```powershell
-dsh plugin --profile web add dsh-moli
-# restart DSH, then call:
-moli_probe action=install
-```
-
-The install action tries several download routes in turn and reports every outcome, because a
-filtered network can block the release host completely. It reports the SHA256 of the exact bytes it
-ran, and `expectedSha256` turns that report into an enforced gate — see
-[Verifying the download](#verifying-the-download). Installation only ever runs when a call asks for
-it; it is never a side effect of using `moli_fetch`.
-
-### Installing into the desktop profile
-
-`dsh plugin --profile desktop …` is refused — the desktop profile belongs to the Electron app. Either
-edit its `package.json` directly (add a `link:` dependency **and** the bundle entry, then run
-`pnpm install`), or use the in-app plugin page (sidebar → **Plugins** → **Add plugin**), which goes
-through the same pnpm path.
-
-A profile plugin needs both halves: a dependency edge and a `dsh.profile.bundles` entry. One without
-the other leaves the plugin invisible to the loader, and an unresolvable bundle is **skipped
-silently** apart from one stderr line (`skipping profile bundle …`). If the tools never appear, that
-line is the first thing to look for.
-
-## Manual install of Moli
-
-When the automatic routes fail, install Moli yourself. These are Moli's own documented commands.
-
-Windows (PowerShell):
-
-```powershell
-powershell -ExecutionPolicy ByPass -c "irm https://github.com/lexmount/moli/releases/latest/download/moli-installer.ps1 | iex"
-```
-
-Linux / macOS:
-
-```sh
-curl --proto '=https' --tlsv1.2 -fsSL https://github.com/lexmount/moli/releases/latest/download/moli-installer.sh | sh
-```
-
-A direct Windows binary is published too, if you would rather not run an installer:
+**3. Direct binary,** if you would rather not run an installer:
 
 ```powershell
 # pick the asset matching your architecture from the releases page
@@ -189,14 +105,17 @@ curl.exe -L -o moli.zip https://github.com/lexmount/moli/releases/latest/downloa
 Expand-Archive moli.zip -DestinationPath "$env:LOCALAPPDATA\Moli" -Force
 ```
 
-After any of these, point the plugin at the result if it landed somewhere unusual:
+Those `releases/latest/download/...` URLs always resolve to the newest release, so they stay valid
+without pinning a version.
+
+After any of them, point the plugin at the result if it landed somewhere unusual:
 
 ```yaml
 config:
   exePath: 'C:\path\to\moli.exe'
 ```
 
-### Verifying the download
+#### Verifying the download
 
 Moli's README documents no checksum or signature, and the installer publishes no checksum file. What
 does exist is GitHub's own per-asset `sha256` digest, readable from the release API:
@@ -219,12 +138,69 @@ Compare it against the file you downloaded:
 ```
 
 The plugin follows the same discipline: `moli_probe action=install` reports the SHA256 of the bytes it
-ran, and `expectedSha256` enforces a digest you supply. It does not invent a trusted default, because
-the digest is only meaningful when compared against the release page's own value.
+ran, and `expectedSha256` turns that report into an enforced gate. It does not invent a trusted
+default, because a digest only means something when compared against the release page's own value.
 
-This is a checked property, not a claim: downloading `v1.1.17`'s installer through
-`downloadInstaller` reproduced `e002f7a6…964d` exactly — the same digest GitHub publishes — and
-re-hashing the file from disk matched too.
+This is a checked property rather than a claim: downloading `v1.1.17`'s installer through the plugin's
+own `downloadInstaller` reproduced `e002f7a6…964d` exactly — the digest GitHub publishes — and
+re-hashing the file from disk matched as well.
+
+### Installing into a desktop profile
+
+`dsh plugin --profile desktop …` is refused — the desktop profile belongs to the Electron app. Either
+edit its `package.json` directly, or use the in-app plugin page (sidebar → **Plugins** → **Add
+plugin**), which installs through the same pnpm path.
+
+A profile plugin needs both halves: a dependency edge (`dependencies`) and a
+`dsh.profile.bundles` entry. One without the other leaves the plugin invisible to the loader. From a
+local checkout the four steps are:
+
+1. Put this directory anywhere, e.g. `D:\dsh_plugins\dsh-moli`.
+2. Add both entries to the profile's `package.json`:
+   - `dependencies`: `"dsh-moli": "link:D:/dsh_plugins/dsh-moli"`
+   - `dsh.profile.bundles`: `"dsh-moli"`
+3. Run `pnpm install` in the profile directory (creates `node_modules/dsh-moli`).
+4. Restart DSH.
+
+An unresolvable bundle is **skipped silently** apart from one stderr line
+(`skipping profile bundle …`). If the tools never appear, that line is the first thing to look for.
+
+## Usage
+
+`moli_fetch` parameters: `url` (required), `dump`, `writeTo`, `eval`, `wait`, `waitSelector`,
+`delayMs`, `timeoutMs`, `maxChars`, `headers`, `userAgent`, `layout`, `scrollbars`, `noJs`,
+`noCss`, `resources`, `withFrames`, `insecureTls`, `profileDir`, `cookieFile`.
+
+```
+moli_fetch url=https://example.com dump=markdown             # token-efficient text
+moli_fetch url=https://example.com dump=semantic_tree_text    # nodes with backend ids
+moli_fetch url=https://example.com eval="document.title"      # one computed value
+moli_fetch url=https://example.com dump=screenshot writeTo=/abs/path/a.png
+moli_fetch url=https://example.com dump=pdf        writeTo=/abs/path/a.pdf
+```
+
+Screenshot and PDF dumps need `writeTo`; the bytes are written verbatim rather than printed.
+
+## Relationship to Moli's own agent skills
+
+Moli ships official agent skills in its repository — [`moli-webfetch`](https://github.com/lexmount/moli/tree/main/skills/moli-webfetch),
+[`moli-websearch`](https://github.com/lexmount/moli/tree/main/skills/moli-websearch), and
+[`moli-cdp-server`](https://github.com/lexmount/moli/tree/main/skills/moli-cdp-server) — and their
+README's quick start is to have an agent install them. If your agent loads skills, the simplest path
+is to point it at those; they are maintained upstream and cover web search and a CDP server too.
+
+This plugin exists because it is a different trade-off, not a replacement:
+
+- **Always-on tool schemas instead of an on-demand skill.** The tools are registered at Host startup,
+  so the model sees them every turn with no discovery step.
+- **DSH-specific failure handling.** The three traps below (sandbox pipe capture, UTF-16 mangling of
+  binary output, bare-specifier resolution for a `link:`ed plugin) plus sandbox/revocation/proxy
+  classification are solved here, because they are DSH-on-Windows problems.
+- **Smaller surface.** Only `fetch` is wrapped; the official skills also cover web search and the CDP
+  server, which this plugin does not.
+
+Both can coexist: install the skills if you want upstream coverage, keep this plugin if you want the
+capabilities always visible to the model.
 
 ## Three design points
 
@@ -252,7 +228,7 @@ Override any field under the plugin's `config` entry in the profile patch layer.
         defaultTimeoutMs: 30000                                  # per-fetch readiness deadline
         maxChars: 200000                                         # inline text truncation
         proxy: 'http://127.0.0.1:7890'                           # forward proxy for moli and downloads
-        insecureTls: true                                        # see TLS notes below
+        insecureTls: true                                        # see the TLS notes below
 ```
 
 Without `exePath`, the plugin probes `exePath` → `MOLI_BIN` → `%LOCALAPPDATA%\Moli\bin\moli.exe` →
@@ -291,20 +267,25 @@ installation under a versioned subdirectory is still found.
 
 ## Verification
 
-`lib/moli.js` and the tool layer were exercised end to end against Moli 1.1.16 on Windows: tool
-registration, probe, Markdown and JSON dumps, `eval` (including a tight-timeout regression guard
-for the `-t` argument position), PNG and PDF artifacts written with valid signatures, truncation,
-every rejection path (binary dump without `writeTo`, unknown `dump`, unknown `wait` stage, missing
+Two suites live in [`verify/`](verify/), and both are runnable against a working tree:
+
+- `schema-verify.mjs` checks the tool definitions with the registry's own validator, including
+  controls that assert the two invalid schema shapes still fail.
+- `install-verify.mjs` drives the install pipeline against a loopback HTTP server: route ordering,
+  the SHA256 of served bytes, refusal to execute on a checksum mismatch, actual execution when the
+  digest matches, and the all-routes-failed diagnostic.
+
+Beyond those, `lib/moli.js` and the tool layer were exercised end to end against Moli 1.1.16 on
+Windows: registration, probe, Markdown and JSON dumps, `eval` (including a tight-timeout regression
+guard for the `-t` argument position), PNG and PDF artifacts with valid signatures, truncation, every
+rejection path (binary dump without `writeTo`, unknown `dump`, unknown `wait` stage, missing
 destination directory), failure classification (unreachable host, HTTP status, sandbox TLS block,
 revocation block), and the concurrency claims. The blocked-host classifier is covered by pure
 function tests using stderr text captured from real runs.
 
-Confirmed at runtime as well: a JavaScript-rendered page (GitHub search) returned 14,560 characters
-of Markdown containing 30 real repository matches when fetched through a local proxy.
-
-The install pipeline is covered against a loopback HTTP server, which proves the mechanics without
-depending on GitHub: route ordering, the SHA256 of served bytes, refusal to execute on a checksum
-mismatch, actual execution when the digest matches, and the all-routes-failed diagnostic.
+Confirmed at runtime too: a JavaScript-rendered page (GitHub search) returned 14,560 characters of
+Markdown containing 30 real repository matches when fetched through a local proxy. A throwaway
+profile with the plugin installed composes its config with no `JsonSchemaError` and no skipped bundle.
 
 ## License
 
