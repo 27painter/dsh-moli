@@ -268,7 +268,7 @@ Works on **Windows, Linux and macOS** (x64 / arm64).
 | Platform | Status |
 |---|---|
 | **Windows** | Verified by the maintainer |
-| **Linux** | Verified on Ubuntu 24.04 LTS, Node v24.21.0, Moli 1.1.17 — including the async install path, proxy injection, and a `strace`-recorded end-to-end fetch |
+| **Linux** | Verified by the contributor, not the maintainer: Ubuntu 24.04 LTS, Node v24.21.0, Moli 1.1.17 — including the async install path, proxy injection, and a `strace`-recorded end-to-end fetch |
 | **macOS** | Implemented, not yet verified on a real host |
 
 - **Windows** — the engine is located at the official installer paths (`%LOCALAPPDATA%\Moli\bin\moli.exe`,

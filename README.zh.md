@@ -248,7 +248,7 @@ Moli 仓库自带官方 agent skill：[`moli-webfetch`](https://github.com/lexmo
 | 平台 | 状态 |
 |---|---|
 | **Windows** | 由维护者验证 |
-| **Linux** | 在 Ubuntu 24.04 LTS、Node v24.21.0、Moli 1.1.17 上验证——含异步安装路径、代理注入、以及 strace 记录的全链路抓取 |
+| **Linux** | **由贡献者验证，非维护者**：Ubuntu 24.04 LTS、Node v24.21.0、Moli 1.1.17——含异步安装路径、代理注入、以及 strace 记录的全链路抓取 |
 | **macOS** | 已实现，尚未在真机验证 |
 
 - **Windows** —— 引擎在官方安装位置查找（`%LOCALAPPDATA%\Moli\bin\moli.exe` 与 `%USERPROFILE%\.local\bin\moli.exe`），
