@@ -8,6 +8,7 @@
 //    serve the fixture file it wrote itself.
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { createServer } from 'node:http';
 import { chmodSync, existsSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -110,6 +111,36 @@ check('checksum caveat stated', /no published checksum/u.test(MANUAL_INSTALL.ver
 console.log('\n6. sha256File');
 check('hashes a real file', sha256File(join(pluginRoot, 'LICENSE')).length === 64);
 check('matches an independently computed digest', sha256File(fixture) === installerSha);
+
+console.log('\n7. timeout / abort kill the process tree');
+// A server that accepts connections but never responds: the download hangs,
+// runAsync's deadline fires, and killTree must reach the grandchild (the
+// installer's curl/IWR), which is observable as the server-side socket closing.
+// The fixture server above runs in a separate process because spawnSync used to
+// block this one; this hang server can be in-process because the download is
+// async now.
+let active = 0;
+const hangServer = createServer((req, res) => {
+  active++;
+  req.socket.on('close', () => { active--; });
+});
+await new Promise(resolve => hangServer.listen(18127, '127.0.0.1', resolve));
+const hangUrl = 'http://127.0.0.1:18127/never-responds.sh';
+
+const timed = await installMoli({ installerUrl: hangUrl, downloadTimeoutMs: 1500, locate: () => undefined });
+check('timeout reported as failure', timed.ok === false);
+await new Promise(resolve => setTimeout(resolve, 800));
+check('timeout killed the grandchild download (connections closed)', active === 0, `${active} active`);
+
+const ac = new AbortController();
+const abortPromise = installMoli({ installerUrl: hangUrl, downloadTimeoutMs: 60000, signal: ac.signal, locate: () => undefined });
+setTimeout(() => ac.abort(), 600);
+const aborted = await abortPromise;
+check('abort reported as failure', aborted.ok === false);
+await new Promise(resolve => setTimeout(resolve, 800));
+check('abort killed the grandchild download (connections closed)', active === 0, `${active} active`);
+
+await new Promise(resolve => hangServer.close(resolve));
 
 server.kill();
 if (existsSync(marker)) unlinkSync(marker);
