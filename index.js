@@ -110,6 +110,7 @@ const FETCH_OUTPUT_SCHEMA = {
     path: { type: 'string' },
     chars: { type: 'integer' },
     bytes: { type: 'integer' },
+    empty: { type: 'boolean' },
     truncated: { type: 'boolean' },
     error: { type: 'string' },
     hint: { type: 'string' },

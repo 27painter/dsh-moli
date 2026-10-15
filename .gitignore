@@ -1,7 +1,14 @@
-node_modules/
+﻿node_modules/
 *.log
 *.tmp
 # Local artifacts produced while testing the tools
 *.png
 *.pdf
 !icon.png
+# Compiled test stubs: verify/*.c are the sources, these are rebuilt by their test
+verify/noop-engine
+verify/noop-engine.exe
+verify/fail-engine
+verify/fail-engine.exe
+verify/warn-engine
+verify/warn-engine.exe
