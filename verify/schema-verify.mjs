@@ -14,16 +14,48 @@
 // Both layers must therefore be RAW JSON Schema, because this plugin registers
 // plain definitions instead of going through `defineTool`.
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { dirname, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const dshRoot = join(process.env.APPDATA, 'npm', 'node_modules', '@deepseek-ai', 'dsh');
+// Locate the npm-global @deepseek-ai/dsh package. The layout differs per
+// platform: Windows keeps npm-global under %APPDATA%\npm\node_modules, while
+// POSIX installs it under a node_modules dir that depends on the runtime
+// (system /usr/local or /usr, nvm, or a per-user prefix). Probe the common
+// candidates instead of assuming one, and fail with the tried list rather than
+// an opaque ERR_INVALID_ARG_TYPE.
+function findDshRoot() {
+  const candidates = process.platform === 'win32'
+    ? [join(process.env.APPDATA ?? '', 'npm', 'node_modules', '@deepseek-ai', 'dsh')]
+    : [
+        '/usr/local/lib/node_modules/@deepseek-ai/dsh',
+        '/usr/lib/node_modules/@deepseek-ai/dsh',
+        join(process.env.HOME ?? '', '.local', 'lib', 'node_modules', '@deepseek-ai', 'dsh'),
+        join(process.env.HOME ?? '', '.npm-global', 'lib', 'node_modules', '@deepseek-ai', 'dsh'),
+        join(process.env.HOME ?? '', 'node_modules', '@deepseek-ai', 'dsh'),
+      ];
+  const found = candidates.find(p => existsSync(p));
+  if (found === undefined) {
+    throw new Error(
+      'dsh package not found under npm-global. Tried:\n  ' + candidates.join('\n  ') +
+      '\nInstall it with: npm install -g @deepseek-ai/dsh, then run this verify again.'
+    );
+  }
+  return found;
+}
+
+const dshRoot = findDshRoot();
 const toolsEntry = join(dshRoot, 'node_modules', '@deepseek-ai', 'dsh-tools', 'lib', 'index.js');
 if (!existsSync(toolsEntry)) throw new Error(`dsh-tools not found at ${toolsEntry}`);
 
 const { assertSupportedJsonSchema, validateJsonSchemaValue, defineTool } = await import(pathToFileURL(toolsEntry).href);
 
-const pluginDir = process.argv[2] ?? 'D:/dsh_plugins/dsh-moli';
+// The default plugin dir is the workspace root (this file lives in verify/).
+// argv[2] still overrides it, e.g. to point at an installed copy. No platform
+// keeps a hardcoded install path as the default: a schema-verify run validates
+// the working tree it lives in, and hosts that target an installed copy pass it
+// explicitly.
+const here = dirname(fileURLToPath(import.meta.url));
+const pluginDir = process.argv[2] ?? dirname(here);
 const registered = new Map();
 const { apply } = await import(pathToFileURL(join(pluginDir, 'index.js')).href);
 apply({ tools: { register: d => registered.set(d.name, d) }, logger: { info() {}, warn() {} } },
