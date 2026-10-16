@@ -19,34 +19,76 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 /**
+ * Run `npm root -g` and return the global modules directory.
+ *
+ * npm is invoked through the current Node binary rather than as `npm`/`npm.cmd`:
+ * Node 20+ refuses to spawn a `.cmd` without `shell: true` (it fails with EINVAL,
+ * which is what broke the Windows CI job), and `shell: true` concatenates
+ * arguments without escaping. Running npm's own cli.js under this Node process
+ * avoids both. `npm_execpath` is set when npm script runs us; otherwise the
+ * expected location under the Node install is used.
+ */
+function npmGlobalRoot() {
+  // `process.execPath` is the running Node, so npm lives beside it. Computing the
+  // path this way works for a system install, nvm, and actions/setup-node, where
+  // the npm package sits under the same prefix as the node binary.
+  const besideNode = join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js');
+  const cliCandidates = [
+    process.env.npm_execpath,
+    besideNode,
+    join(process.env.APPDATA ?? '', 'npm', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+    'C:\\npm\\prefix\\node_modules\\npm\\bin\\npm-cli.js',
+    join(process.env.ProgramFiles ?? 'C:\\Program Files', 'nodejs', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+  ].filter(p => typeof p === 'string' && p !== '' && existsSync(p));
+
+  for (const cli of cliCandidates) {
+    const r = spawnSync(process.execPath, [cli, 'root', '-g'], { encoding: 'utf8', timeout: 60000 });
+    const out = String(r.stdout ?? '').trim();
+    if (r.status === 0 && out !== '') return { root: out };
+  }
+
+  // Last resort: the platform launcher, which is only spawnable where Node still
+  // permits a `.cmd` to be executed directly.
+  const r = spawnSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['root', '-g'],
+    { encoding: 'utf8', timeout: 60000 });
+  const out = String(r.stdout ?? '').trim();
+  if (r.status === 0 && out !== '') return { root: out };
+  return {
+    error: `${String(r.error?.code ?? r.status ?? 'no output')}`
+      + (cliCandidates.length === 0 ? ` (no npm cli.js found; looked for ${besideNode})` : ''),
+  };
+}
+
+/**
  * Locate the npm-global `@deepseek-ai/dsh` package.
  *
  * Ask npm where its global modules live instead of deriving it. Two earlier
  * attempts failed in CI: a candidate list missed the tree because
  * `actions/setup-node` relocates the global prefix (`npm install -g` reported
  * "added 540 packages" while `/usr/local/lib` stayed empty), and building the
- * path from `npm prefix -g` was wrong there too -- on that runner the prefix is
- * the Node install directory, so appending `node_modules` missed. `npm root -g`
- * answers with the modules directory directly on every install shape, and the
- * list below is only a fallback for when npm cannot be run.
+ * path from `npm prefix -g` was wrong there too. `npm root -g` answers with the
+ * modules directory directly, and on Windows CI it correctly reported
+ * `C:\npm\prefix\node_modules` -- the failure there was only how npm was spawned.
+ * The list below is a fallback for when npm cannot be run at all.
  */
 function findDshRoot() {
   const tried = [];
   const looksRight = p => existsSync(join(p, 'package.json'));
 
-  const npm = spawnSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['root', '-g'],
-    { encoding: 'utf8', timeout: 60000, windowsHide: true });
-  const root = String(npm.stdout ?? '').trim();
-  if (npm.status === 0 && root !== '') {
+  const { root, error } = npmGlobalRoot();
+  if (root !== undefined) {
     const candidate = join(root, '@deepseek-ai', 'dsh');
     tried.push(`${candidate}  (from \`npm root -g\`)`);
     if (looksRight(candidate)) return candidate;
   } else {
-    tried.push(`\`npm root -g\` failed: ${String(npm.error?.message ?? npm.stderr ?? '').trim().slice(0, 120)}`);
+    tried.push(`\`npm root -g\` failed: ${String(error)}`);
   }
 
   const fallbacks = process.platform === 'win32'
-    ? [join(process.env.APPDATA ?? '', 'npm', 'node_modules', '@deepseek-ai', 'dsh')]
+    ? [
+        join(process.env.APPDATA ?? '', 'npm', 'node_modules', '@deepseek-ai', 'dsh'),
+        join('C:\\npm\\prefix', 'node_modules', '@deepseek-ai', 'dsh'),
+      ]
     : [
         '/usr/local/lib/node_modules/@deepseek-ai/dsh',
         '/opt/homebrew/lib/node_modules/@deepseek-ai/dsh',

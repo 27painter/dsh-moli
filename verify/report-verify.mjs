@@ -19,17 +19,42 @@ import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-// Same rule as schema-verify.mjs: ask npm where its global modules live
-// (`npm root -g`) rather than assuming %APPDATA%\npm or /usr/local/lib, because
-// installers -- nvm, Homebrew, actions/setup-node -- relocate the prefix.
+// Same rule as schema-verify.mjs: ask npm where its global modules live rather
+// than assuming %APPDATA%\npm or /usr/local/lib, because installers -- nvm,
+// Homebrew, actions/setup-node -- relocate the prefix. npm runs through the
+// current Node binary: Node 20+ refuses to spawn a bare `.cmd` (EINVAL, which is
+// what broke the Windows CI job) and `shell: true` does not escape arguments.
+function npmGlobalRoot() {
+  // npm lives beside the running node binary, which covers a system install, nvm
+  // and actions/setup-node alike.
+  const besideNode = join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js');
+  const clis = [
+    process.env.npm_execpath,
+    besideNode,
+    join(process.env.APPDATA ?? '', 'npm', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+    'C:\\npm\\prefix\\node_modules\\npm\\bin\\npm-cli.js',
+  ].filter(p => typeof p === 'string' && p !== '' && existsSync(p));
+  for (const cli of clis) {
+    const r = spawnSync(process.execPath, [cli, 'root', '-g'], { encoding: 'utf8', timeout: 60000 });
+    const out = String(r.stdout ?? '').trim();
+    if (r.status === 0 && out !== '') return out;
+  }
+  const r = spawnSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['root', '-g'],
+    { encoding: 'utf8', timeout: 60000 });
+  const out = String(r.stdout ?? '').trim();
+  return r.status === 0 && out !== '' ? out : undefined;
+}
+
 function findDshRoot() {
-  const npm = spawnSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['root', '-g'],
-    { encoding: 'utf8', timeout: 60000, windowsHide: true });
-  const root = String(npm.stdout ?? '').trim();
+  const root = npmGlobalRoot();
   const candidates = [];
-  if (npm.status === 0 && root !== '') candidates.push(join(root, '@deepseek-ai', 'dsh'));
-  if (process.platform === 'win32') candidates.push(join(process.env.APPDATA ?? '', 'npm', 'node_modules', '@deepseek-ai', 'dsh'));
-  else {
+  if (root !== undefined) candidates.push(join(root, '@deepseek-ai', 'dsh'));
+  if (process.platform === 'win32') {
+    candidates.push(
+      join(process.env.APPDATA ?? '', 'npm', 'node_modules', '@deepseek-ai', 'dsh'),
+      'C:\\npm\\prefix\\node_modules\\@deepseek-ai\\dsh',
+    );
+  } else {
     candidates.push(
       '/usr/local/lib/node_modules/@deepseek-ai/dsh',
       '/opt/homebrew/lib/node_modules/@deepseek-ai/dsh',
