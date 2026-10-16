@@ -167,11 +167,11 @@ for (const [name, def] of registered) {
   // not exist.
   const declared = Array.isArray(p.required) ? p.required : [];
   if (declared.length > 0) {
-    // Build a value that actually satisfies each declaration. An enum member must
-    // be one of its values -- supplying the literal 'x' made moli_session's
-    // required `action` fail validation, which was a defect in this probe rather
-    // than in the schema. `oneOf`/`anyOf` are not used by these tools; if one
-    // appears, its first branch is tried.
+    // Build a value that actually satisfies each declaration. An enum member has to
+    // be one of its values: supplying the literal 'x' for every required field made
+    // a required enum fail validation, which was a defect in this probe rather than
+    // in the schema. `oneOf`/`anyOf` are not used by these tools; if one appears,
+    // its first branch is tried.
     const sampleFor = (name, schema) => {
       let s = schema ?? {};
       if (Array.isArray(s.oneOf) && s.oneOf.length > 0) s = s.oneOf[0];

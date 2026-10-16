@@ -209,9 +209,9 @@ An unresolvable bundle is **skipped silently** apart from one stderr line
 
 ## Usage
 
-`moli_fetch` parameters: `url` (required), `dump`, `writeTo`, `eval`, `wait`, `waitSelector`,
-`delayMs`, `timeoutMs`, `maxChars`, `headers`, `userAgent`, `layout`, `scrollbars`, `noJs`,
-`noCss`, `resources`, `withFrames`, `insecureTls`, `profileDir`, `cookieFile`.
+`moli_fetch` parameters: `url` (required), `dump`, `writeTo`, `eval`, `scroll`, `wait`,
+`waitSelector`, `delayMs`, `timeoutMs`, `maxChars`, `headers`, `userAgent`, `layout`, `scrollbars`,
+`noJs`, `noCss`, `resources`, `withFrames`, `insecureTls`, `profileDir`, `cookieFile`, `proxy`.
 
 ```
 moli_fetch url=https://example.com dump=markdown             # token-efficient text
@@ -219,105 +219,30 @@ moli_fetch url=https://example.com dump=semantic_tree_text    # nodes with backe
 moli_fetch url=https://example.com eval="document.title"      # one computed value
 moli_fetch url=https://example.com dump=screenshot writeTo=/abs/path/a.png
 moli_fetch url=https://example.com dump=pdf        writeTo=/abs/path/a.pdf
+moli_fetch url=https://example.com dump=markdown scroll=800   # trigger lazy loading first
 ```
 
 Screenshot and PDF dumps need `writeTo`; the bytes are written verbatim rather than printed.
 
-### `moli_session` — an interactive browser
+### `scroll` — reach what only appears on a scroll
 
-`moli_fetch` loads a page and prints it. That covers reading, and nothing else: it cannot dismiss a
-consent wall, fill a search box, scroll a lazy list, or wait for a client-side route to change.
-`moli_session` drives a persistent browser instead, over the Chrome DevTools Protocol endpoint that
-`moli serve` publishes. State — cookies, navigation, typed input — survives between calls until you
-stop it.
-
-```
-moli_session action=open  url=https://example.com        # start the browser and navigate
-moli_session action=snapshot                             # the rendered page as text
-moli_session action=click selector="#accept-cookies"
-moli_session action=type  selector="#q" text="moli" submit=true
-moli_session action=scroll dy=1200
-moli_session action=waitFor selector=".results"
-moli_session action=eval  expression="document.title"
-moli_session action=screenshot writeTo=/abs/path/a.png
-moli_session action=status                               # is it running, and on what page
-moli_session action=close                                # stop it and free the port
-```
-
-Elements are addressed by **CSS selector**, never by pixel coordinates: the tool measures the element
-and dispatches real mouse and key events, so page handlers run exactly as they do for a person.
-
-### Choosing a browser: `moli` or `chromium`
-
-`moli_session` can drive either engine, and you choose which — there is **no automatic fallback**,
-because switching engines when one click fails would make the timing and the behaviour depend on which
-operation happened to fail, and you could not tell which browser answered.
-
-```yaml
-config:
-  sessionBrowser: moli          # moli (default) or chromium
-  sessionBrowserPath: ''        # optional path to chrome.exe / msedge.exe / brave
-  sessionPort: 9222
-```
-
-**Why the choice exists.** Moli's element geometry is document-absolute and does not follow scrolling,
-and its hit test is bounded by the viewport height. Measured on Moli 1.1.16 and Chrome 155, same page,
-same element:
-
-| | `rect.y` at scrollY 0 / 400 / 800 | click a control below the first viewport |
-|---|---|---|
-| **moli** | 1008 / 1008 / 1008 — never moves | **impossible**; synthetic input cannot reach it |
-| **chromium** | 1008 / 608 / 208 — follows the scroll | **works**; the browser scrolls to it |
-
-So moli is the good default — it is the engine this plugin wraps, it is lighter, and it is already
-installed — and a real Chromium is what you switch to when a task needs an element further down a long
-page. When moli refuses, it says so, names the element, and points at both routes:
+The engine serializes the whole document, so a plain fetch already contains everything the DOM holds.
+What it cannot contain is content that does not exist yet: a list that loads on the first `scroll`
+event, an `IntersectionObserver` that fires on entry, an image swapped in when it nears the viewport.
+`scroll` runs the scroll before the capture, so those handlers fire first.
 
 ```
-moli_session action=click selector="#far-down"
-  → "#far-down" is below the viewport (y=2548) and this engine cannot send input there
-
-# either click from inside the page (reaches it, but skips hover and focus behaviour)
-moli_session action=eval expression="document.querySelector('#far-down').click()"
-
-# or use a real browser for that session
-config: sessionBrowser: chromium
+moli_fetch url=https://example.com/feed dump=markdown scroll=600
+moli_fetch url=https://example.com/feed dump=markdown scroll=bottom
+moli_fetch url=https://example.com/feed dump=markdown scroll=-400    # back up
 ```
 
-With `chromium` the plugin starts the browser it finds (Chrome, Edge or Brave, or `sessionBrowserPath`)
-in `--headless=new` mode with its own profile, so it does not touch your normal browsing profile.
+Measured on a page whose `scroll` handler fills a slot: without `scroll` the dump says
+`STILL-EMPTY`, with `scroll=1000` it says `LAZY-CONTENT-1000`. It also moves the screenshot, so a
+scrolled `dump=screenshot` shows that part of the page.
 
-### Driving a browser you already have open
-
-Pass `cdpEndpoint` to attach to a CDP port instead of starting anything. This is the only way to inherit
-your own cookies and logins: start your browser with `--remote-debugging-port=9222`, then
-
-```
-moli_session action=open url=https://example.com cdpEndpoint=http://127.0.0.1:9222
-```
-
-The endpoint applies to that call only. A browser this plugin did not start is **never stopped by
-`close`**, and `status` reports `external: true` so you can tell.
-
-### `cdp` — the raw protocol escape hatch
-
-Everything the named actions do is an abstraction chosen in advance. `action=cdp` is not:
-
-```
-moli_session action=cdp method=Browser.getVersion
-moli_session action=cdp method=Network.setExtraHTTPHeaders params={"headers":{"X-Thing":"1"}}
-moli_session action=cdp method=DOM.setFileInputFiles params={"files":["/abs/a.png"],"nodeId":42}
-```
-
-It reaches what the wrapper does not: other targets, cross-origin frames, file inputs, extra headers,
-network interception. `params` may be an object or a JSON string.
-
-The session needs **Node 21 or newer** for the built-in `WebSocket`; on Node 20 the tool answers with
-that reason instead of failing obscurely. `moli_fetch` and `moli_probe` still work on 20.12.
-
-`moli_session` also takes `port` (default 9222). If that port is already served by a `moli serve` you
-started yourself, the tool connects to it rather than failing to bind — and `close` then leaves it
-alone, because it is not ours to stop.
+It runs as part of the engine's own pre-capture evaluation and therefore composes with `eval`: the
+scroll happens first, and the expression still returns its own value.
 
 ## Relationship to Moli's own agent skills
 
@@ -406,25 +331,11 @@ Override any field under the plugin's `config` entry in the profile patch layer.
         maxChars: 200000                                         # inline text truncation
         proxy: 'http://127.0.0.1:7890'                           # forward proxy for moli, downloads, and the installer's engine download
         insecureTls: true                                        # see the TLS notes below
-        sessionBrowser: moli                                     # or chromium, for the session tool
-        sessionBrowserPath: ''                                   # explicit chrome.exe / msedge.exe / brave
-        sessionPort: 9222                                        # CDP port for moli_session
-        blockPrivateNetworks: false                              # refuse private addresses (see the note below)
-        blockCidrs: []                                           # extra CIDRs to refuse
 ```
 
 The plugin-level `proxy` above is the default; `moli_fetch` also takes a `proxy` argument, so a single
 call can route through a different proxy without changing the profile. A loopback URL always bypasses
 whichever proxy is in effect.
-
-`blockPrivateNetworks` is **off by default, matching the engine**: `moli fetch http://10.0.0.1/` reaches
-a private address, so the plugin does not silently narrow what the moli you installed already does.
-Turn it on, or list `blockCidrs`, when the agent is following links on pages you do not control and
-you want the engine to refuse private destinations. Two caveats worth knowing before you rely on it:
-moli documents the policy as applying to **directly connected** targets, so a configured `proxy`
-routes around it, and only `blockCidrs` (which the proxy must enforce) covers that path. The sharpest
-target this protects is the cloud metadata address `169.254.169.254`, which hands out instance
-credentials on a VM.
 
 Without `exePath`, the plugin probes `exePath` → `MOLI_BIN` → `%LOCALAPPDATA%\Moli\bin\moli.exe` →
 `%USERPROFILE%\.local\bin\moli.exe`, then scans inside `%LOCALAPPDATA%\Moli` for a `moli.exe`, so an
@@ -488,25 +399,20 @@ Four suites live in [`verify/`](verify/), and all are runnable against a working
   `dump` discards its value, an expression that throws is classified as such instead of being blamed
   on the installation, truncation keeps the tail as well as the head, `proxy` is a per-call parameter,
   and `moli_probe` states which process its `httpsOk` describes.
-- `session-verify.mjs` drives `moli_session` end to end against a `data:` URL fixture, so it needs no
-  network and no site stays still underneath it: lifecycle and port release, snapshot, click, type
-  with and without clearing, press, scroll, `waitFor` in both directions, eval including a throwing
-  expression, screenshot byte signature, navigation by clicking a link, restart after close, and the
-  viewport limit described above — which is asserted as a limit, with the `eval` route that works
-  around it asserted next to it. It skips when no engine is installed.
-- `session-backends.mjs` is the comparison that justifies the second backend: the same page, the same
-  control below the viewport, asserted to be **refused on moli and clicked on Chromium**, plus the
-  `cdp` action on both. The Chromium half skips when the machine has no Chromium-family browser.
-- `session-attach-verify.mjs` covers external endpoints and ownership: attaching to a browser this
-  plugin did not start, identifying it correctly, refusing to stop it on `close`, and — the trap that
-  a behavioural probe got wrong — classifying an external **moli** as moli even though it answers
-  `/json/version` with `"Browser":"Chrome/145.0.0.0"`. It also asserts that naming a per-call endpoint
-  does not latch it, which an earlier version did: one call against a dead endpoint left the session
-  pointing at port 9 for the rest of the process.
+- `scroll-verify.mjs` checks the expression builder without an engine (pixels, negatives, `top`,
+  `bottom`, nonsense rejected, the caller's `eval` value preserved) and then, when an engine is
+  present, fetches a page whose `scroll` handler fills a slot and asserts the content appears with
+  `scroll` and the placeholder appears without it — a property of the output, not of an internal call.
 
-`.github/workflows/verify.yml` runs the first two on Linux, Windows and macOS (they need no engine and
-no network) and attempts the engine-dependent suites on Linux and Windows, reporting a missing engine
-as a skip rather than a failure.
+`.github/workflows/verify.yml` runs `schema-verify`, `empty-verify` and `scroll-verify` on Linux,
+Windows and macOS (they need no engine and no network) and attempts the engine-dependent suites on
+Linux and Windows, reporting a missing engine as a skip rather than a failure.
+
+`report-verify.mjs` is deliberately **not** in CI. Three of its checks fetch `example.com` and one
+fetches a specific forum thread, so it needs the open internet — and on a host whose traffic goes
+through a proxy, that proxy too. Useful where a network is available, but a suite that goes red
+because a website changed is worse than no suite, so it stays a local check. If you run it and see
+failures in sections 4–6 while sections 1–3 pass, suspect the network before the code.
 
 Beyond those, `lib/moli.js` and the tool layer were exercised end to end against Moli 1.1.16 on
 Windows: registration, probe, Markdown and JSON dumps, `eval` (including a tight-timeout regression
@@ -519,6 +425,21 @@ function tests using stderr text captured from real runs.
 Confirmed at runtime too: a JavaScript-rendered page (GitHub search) returned 14,560 characters of
 Markdown containing 30 real repository matches when fetched through a local proxy. A throwaway
 profile with the plugin installed composes its config with no `JsonSchemaError` and no skipped bundle.
+
+## Version note: 1.1.11 and 1.1.12 are deprecated
+
+**Use 1.1.13 or later.** Two releases between them carried an interactive-browser experiment —
+`moli_session`, a second Chromium backend, a raw-CDP escape hatch, per-call CDP endpoints, persistent
+browser profiles — roughly 2,300 lines of machinery reaching well past what this plugin is for. It has
+been removed and the code is back to the 1.1.10 shape plus one focused addition.
+
+The useful finding from that work is kept in [`/lib/moli.js`](lib/moli.js) and appears above as the
+`scroll` parameter. Everything else it needed was already in `moli fetch`'s own `--eval`, so the
+experiment bought nothing that a parameter could not.
+
+On the versions themselves: npm allows a version to be unpublished only briefly and never
+individually, so 1.1.11 and 1.1.12 remain installable but are marked deprecated and point here.
+`npm install dsh-moli` resolves to 1.1.13.
 
 ## Releasing
 

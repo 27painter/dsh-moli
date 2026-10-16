@@ -195,9 +195,9 @@ profile 插件需要两半都齐：依赖边（`dependencies`）+ `dsh.profile.b
 
 ## 用法
 
-`moli_fetch` 参数：`url`（必填）、`dump`、`writeTo`、`eval`、`wait`、`waitSelector`、`delayMs`、
-`timeoutMs`、`maxChars`、`headers`、`userAgent`、`layout`、`scrollbars`、`noJs`、`noCss`、
-`resources`、`withFrames`、`insecureTls`、`profileDir`、`cookieFile`。
+`moli_fetch` 参数：`url`（必填）、`dump`、`writeTo`、`eval`、`scroll`、`wait`、`waitSelector`、
+`delayMs`、`timeoutMs`、`maxChars`、`headers`、`userAgent`、`layout`、`scrollbars`、`noJs`、
+`noCss`、`resources`、`withFrames`、`insecureTls`、`profileDir`、`cookieFile`、`proxy`。
 
 ```
 moli_fetch url=https://example.com dump=markdown            # 省 token 的正文
@@ -205,99 +205,29 @@ moli_fetch url=https://example.com dump=semantic_tree_text   # 带节点 id 的�
 moli_fetch url=https://example.com eval="document.title"     # 取一个值
 moli_fetch url=https://example.com dump=screenshot writeTo=/绝对路径/a.png
 moli_fetch url=https://example.com dump=pdf        writeTo=/绝对路径/a.pdf
+moli_fetch url=https://example.com dump=markdown scroll=800  # 先触发懒加载再抓取
 ```
 
 截图与 PDF 必须给 `writeTo`；字节是原样落盘的，不会打印到输出里。
 
-### `moli_session` —— 可交互的浏览器
+### `scroll` —— 拿到"只有滚动后才出现"的内容
 
-`moli_fetch` 是"加载一页、打印出来"，只能读。它点不掉同意墙、填不了搜索框、滚不动懒加载列表，也等不到
-客户端路由切换。`moli_session` 驱动的是一个**常驻浏览器**，走 `moli serve` 暴露的 Chrome DevTools
-Protocol。状态（cookie、导航位置、已输入的内容）在多次调用之间保持，直到你显式停止。
-
-```
-moli_session action=open  url=https://example.com        # 启动浏览器并导航
-moli_session action=snapshot                             # 渲染后的页面文本
-moli_session action=click selector="#accept-cookies"
-moli_session action=type  selector="#q" text="moli" submit=true
-moli_session action=scroll dy=1200
-moli_session action=waitFor selector=".results"
-moli_session action=eval  expression="document.title"
-moli_session action=screenshot writeTo=/绝对路径/a.png
-moli_session action=status                               # 是否在运行、当前在哪一页
-moli_session action=close                                # 停止并释放端口
-```
-
-元素一律用 **CSS 选择器**定位，不接受像素坐标：工具自己测量元素并派发真实的鼠标与键盘事件，所以页面的
-处理器会像人操作时一样执行。
-
-### 选哪个浏览器：`moli` 还是 `chromium`
-
-`moli_session` 可以驱动两种引擎，由你选择——**没有自动降级**。因为"某个点击失败就换引擎"会让工具的耗时和
-行为取决于哪一步恰好失败，而且你无法知道最后是哪个浏览器在回答。
-
-```yaml
-config:
-  sessionBrowser: moli          # moli（默认）或 chromium
-  sessionBrowserPath: ''        # 可选，指定 chrome.exe / msedge.exe / brave
-  sessionPort: 9222
-```
-
-**为什么需要这个选择。** moli 的元素几何是**文档绝对坐标且不随滚动更新**，命中测试又受视口高度限制。在
-Moli 1.1.16 与 Chrome 155 上，同一页面、同一元素实测：
-
-| | `rect.y` 在 scrollY 0 / 400 / 800 | 点击首个视口以下的控件 |
-|---|---|---|
-| **moli** | 1008 / 1008 / 1008 —— 纹丝不动 | **做不到**，合成输入触达不了 |
-| **chromium** | 1008 / 608 / 208 —— 跟随滚动 | **可以**，浏览器会滚动到它 |
-
-所以 moli 是合适的默认值——它是本插件包装的引擎、更轻、而且你已经装了；而当任务需要长页面下方的元素时，
-就换成真实 Chromium。moli 拒绝时会把原因、元素和两条出路都讲清楚：
+引擎会序列化整个文档，所以普通抓取**已经包含 DOM 里的一切**。它拿不到的是**尚未存在的内容**：首次
+`scroll` 事件才加载的列表、进入视口才触发的 `IntersectionObserver`、靠近视口才换上的图片。`scroll` 会在
+抓取前置入一次滚动，让这些处理器先跑起来。
 
 ```
-moli_session action=click selector="#far-down"
-  → "#far-down" is below the viewport (y=2548) and this engine cannot send input there
-
-# 要么在页面内部点击（能触达，但会跳过 hover 与 focus 行为）
-moli_session action=eval expression="document.querySelector('#far-down').click()"
-
-# 要么这个会话改用真实浏览器
-config: sessionBrowser: chromium
+moli_fetch url=https://example.com/feed dump=markdown scroll=600
+moli_fetch url=https://example.com/feed dump=markdown scroll=bottom
+moli_fetch url=https://example.com/feed dump=markdown scroll=-400    # 往回滚
 ```
 
-选 `chromium` 时，插件会在 `--headless=new` 模式下用**独立 profile** 启动它找到的浏览器（Chrome、Edge 或
-Brave，也可用 `sessionBrowserPath` 指定），不会碰你日常使用的浏览器配置。
+在一个"滚动处理器填充某个槽位"的页面上实测：不带 `scroll` 时 dump 是 `STILL-EMPTY`，带
+`scroll=1000` 时是 `LAZY-CONTENT-1000`。它同样会改变截图，所以带滚动的 `dump=screenshot` 拍到的是页面的
+那一段。
 
-### 驱动你自己已经开着的浏览器
-
-传 `cdpEndpoint` 即可连接到已有的 CDP 端口，什么都不启动。这是**继承你自己 cookie 与登录态的唯一途径**：
-用 `--remote-debugging-port=9222` 启动你的浏览器，然后
-
-```
-moli_session action=open url=https://example.com cdpEndpoint=http://127.0.0.1:9222
-```
-
-该端点**只对当次调用生效**。不是本插件启动的浏览器**永远不会被 `close` 关掉**，并且 `status` 会报
-`external: true` 让你能分辨。
-
-### `cdp` —— 原始协议逃生舱
-
-具名动作全都是"预先替你决定好的抽象"，而 `action=cdp` 不是：
-
-```
-moli_session action=cdp method=Browser.getVersion
-moli_session action=cdp method=Network.setExtraHTTPHeaders params={"headers":{"X-Thing":"1"}}
-moli_session action=cdp method=DOM.setFileInputFiles params={"files":["/绝对/a.png"],"nodeId":42}
-```
-
-它能做到包装层做不到的事：切换 target、跨域 iframe、文件上传、额外的请求头、网络拦截。`params` 可以是对象
-或 JSON 字符串。
-
-本工具需要 **Node 21 或更新版本**（内置 `WebSocket`）；在 Node 20 上会直接说明原因，而不是给出费解的失败。
-`moli_fetch` 与 `moli_probe` 仍支持 20.12。
-
-`moli_session` 也接受 `port`（默认 9222）。如果该端口已经由你自己启动的 `moli serve` 占用，工具会连接它
-而不是绑定失败——此时 `close` **不会**停掉它，因为那不是我们的进程。
+它作为引擎自身"抓取前求值"的一部分执行，因此与 `eval` 可组合：**先滚动，表达式再读取页面，并且仍然返回
+它自己的值**。
 
 ## 与 Moli 官方 agent skill 的关系
 
@@ -374,21 +304,10 @@ cookie 驱动的查询参数。那次实测同时覆盖了代理下载路由与�
         maxChars: 200000                                         # 内联文本截断阈值
         proxy: 'http://127.0.0.1:7890'                           # 转给本地正向代理（moli、下载、安装器内部引擎下载都走它）
         insecureTls: true                                        # 见下方 TLS 说明
-        sessionBrowser: moli                                     # 或 chromium，供 session 工具使用
-        sessionBrowserPath: ''                                   # 显式指定 chrome.exe / msedge.exe / brave
-        sessionPort: 9222                                        # moli_session 的 CDP 端口
-        blockPrivateNetworks: false                              # 拒绝私网地址（见下方说明）
-        blockCidrs: []                                           # 额外拒绝的 CIDR
 ```
 
 上面配置里的 `proxy` 是默认值；`moli_fetch` 也能接收 `proxy` 参数，因此单次调用可以走另一个代理而不必改
 profile。无论生效的是哪个代理，loopback 地址一律绕过它。
-
-`blockPrivateNetworks` **默认关闭，与引擎一致**：`moli fetch http://10.0.0.1/` 本来就能访问私网地址，插件
-不会悄悄收窄你已安装的 moli 的能力。当 agent 会在你无法控制的页面上跟着链接走、而你希望引擎拒绝私网目标时，
-再打开它或配置 `blockCidrs`。依赖它之前有两点需要知道：moli 文档写明该策略只作用于**直连**目标，因此配置了
-`proxy` 就会绕过它，只有 `blockCidrs`（由代理执行）能覆盖那条路径。这个开关保护的最锐利目标是云元数据地址
-`169.254.169.254`——在虚拟机上它会交出实例凭据。
 
 未设置 `exePath` 时探测顺序：`exePath` → 环境变量 `MOLI_BIN` → `%LOCALAPPDATA%\Moli\bin\moli.exe`
 → `%USERPROFILE%\.local\bin\moli.exe`，随后还会在 `%LOCALAPPDATA%\Moli` 内递归查找 `moli.exe`，
@@ -436,20 +355,18 @@ profile。无论生效的是哪个代理，loopback 地址一律绕过它。
 - `report-verify.mjs` 守住一份使用体验报告里的发现：`eval` 与 `dump` 同用会丢弃表达式值（已在参数描述里
   写明）、表达式抛异常时被正确归类而不是甩锅给"安装有问题"、截断同时保留头尾、`proxy` 是可按调用传入的参数、
   以及 `moli_probe` 会说明它的 `httpsOk` 描述的是哪个进程。
-- `session-verify.mjs` 用 `data:` URL 夹具端到端驱动 `moli_session`，因此不依赖网络、也不会因为站点变化而
-  失效：生命周期与端口释放、snapshot、click、带与不带清空的 type、press、scroll、两个方向的 `waitFor`、
-  含抛异常的 eval、截图字节签名、点击链接导航、关闭后重启，以及上面那条视口限制——限制被当作**限制**断言，
-  紧随其后断言真正能绕过它的 `eval` 路径。未安装引擎时跳过。
-- `session-backends.mjs` 是**证明第二个后端存在必要性**的对照：同一页面、同一个视口以下的控件，断言它
-  **在 moli 上被拒绝、在 Chromium 上被点中**，并在两者上都验证 `cdp` 动作。机器上没有 Chromium 系浏览器时
-  跳过 Chromium 那半。
-- `session-attach-verify.mjs` 覆盖外部端点与归属权：连接不是本插件启动的浏览器、正确识别它、`close` 时拒绝
-  停掉它；以及那个**行为探测会搞错的陷阱**——外部端点是 **moli** 时仍判定为 moli，尽管它在 `/json/version`
-  里报的是 `"Browser":"Chrome/145.0.0.0"`。它还断言按调用传入的端点**不会粘住**——早期版本会：一次对死端点
-  的调用会让整个进程后续都指向 9 端口。
+- `scroll-verify.mjs` 在无引擎时校验表达式构造（像素值、负数、`top`、`bottom`、无效输入被拒、调用方的 `eval`
+  值被保留），有引擎时抓取一个"滚动处理器填充槽位"的页面，断言带 `scroll` 时内容出现、不带时只有占位符——
+  断言的是**输出**的性质，而不是内部调用。
 
-`.github/workflows/verify.yml` 在 Linux、Windows、macOS 上跑前两个（无需引擎、无需网络），在 Linux 与 Windows
-上尝试依赖引擎的几套；若 runner 上没有引擎，则报告为跳过而不是失败。
+`.github/workflows/verify.yml` 在 Linux、Windows、macOS 上跑 `schema-verify`、`empty-verify` 与
+`scroll-verify`（无需引擎、无需网络），在 Linux 与 Windows 上尝试依赖引擎的几套；若 runner 上没有引擎，
+则报告为跳过而不是失败。
+
+`report-verify.mjs` **故意不放进 CI**：其中三项会抓 `example.com`，还有一项抓一个具体的论坛帖子，因此它
+需要能上外网——如果这台机器的流量走代理，还需要那个代理可用。有网络时它是有用的，但**一个因为网站改版就变
+红的测试套件，比没有套件更糟**，所以它只作为本机检查保留。如果你跑它时发现第 1–3 节通过而第 4–6 节失败，
+**先怀疑网络，再怀疑代码**。
 
 此外，`lib/moli.js` 与工具层在 Windows 上对 Moli 1.1.16 做了端到端验证：注册、probe、Markdown 与 JSON
 dump、`eval`（含针对 `-t` 参数位置的紧超时回归防护）、PNG 与 PDF 产物签名、截断、全部拒绝路径（二元 dump
@@ -459,6 +376,19 @@ dump、`eval`（含针对 `-t` 参数位置的紧超时回归防护）、PNG 与
 运行时也确认过：走本地代理抓取 JavaScript 渲染页面（GitHub 搜索）返回 14,560 字符 Markdown，其中包含
 30 处真实结果匹配。另有一个装了本插件的一次性 profile，组合其配置时既无 `JsonSchemaError` 也无被跳过的
 bundle。
+
+## 版本说明：1.1.11 与 1.1.12 已废弃
+
+**请使用 1.1.13 或更高版本。** 这两个版本之间夹着一次"交互式浏览器"实验——`moli_session`、第二个
+Chromium 后端、原始 CDP 逃生舱、按调用的 CDP 端点、持久化浏览器 profile——约 2300 行机制，远远超出了这个
+插件的定位。它已被移除，代码回到 1.1.10 的形态，只保留一处聚焦的新增。
+
+那次工作里唯一有价值的发现保留在 [`/lib/moli.js`](lib/moli.js)，并以 `scroll` 参数的形式出现在上文。**它
+本来需要的其他一切，`moli fetch` 自带的 `--eval` 早就有了**——所以那次实验没有换来任何"一个参数换不来的
+东西"。
+
+关于这两个版本本身：npm 只允许在很短的时间窗口内撤回发布，且无法单独撤回某一个版本，因此 1.1.11 与
+1.1.12 仍然可安装，但已被标记为废弃并指向这里。`npm install dsh-moli` 会安装到 1.1.13。
 
 ## 发布
 

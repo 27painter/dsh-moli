@@ -1,24 +1,17 @@
-# name: verify
-#
+name: verify
+
 # Every pull request so far was verified by hand. The suites exist but nothing ran
 # them, which is how a Windows-only default and a head-only truncation both
-# shipped. Three tiers fix that:
+# shipped. These two tiers fix that:
 #
-#   core    - schema-verify, empty-verify and report-verify need no engine and no
-#             network. They cover the failure classes that actually shipped (an
-#             output schema the registry rejects, a successful-but-empty fetch
-#             reported as an error, and a one-shot regression), so they run
-#             everywhere and must pass.
+#   core    - schema-verify and empty-verify need no engine and no network. They
+#             cover the two failure classes that actually shipped (an output
+#             schema the registry rejects, and a successful-but-empty fetch
+#             reported as an error), so they run everywhere and must pass.
 #   engine  - install-verify, win-verify and linux-verify drive real moli. A
 #             runner has none installed, so these are attempted and only their
 #             actual failures fail the job; "engine not found" is reported as a
 #             skip instead of a red build that hides real breakage.
-#   session - the interactive browser suites, which need Node >= 21 for the
-#             built-in WebSocket. They spawn moli when it is present and a real
-#             Chromium when the runner has one, skipping what is unavailable. The
-#             runner image ships Chrome, so the browser paths are exercised for
-#             real here rather than only on a developer machine -- which is the
-#             entire reason the second backend exists.
 #
 # Add the CI-only dependencies here as they appear.
 
@@ -81,8 +74,10 @@ jobs:
       - name: empty-verify (successful fetch with no output)
         run: node verify/empty-verify.mjs
 
-      - name: report-verify (findings from a usage report)
-        run: node verify/report-verify.mjs
+      # The expression-builder half needs no engine; the end-to-end half skips
+      # without one, so this is safe on a runner that has no moli.
+      - name: scroll-verify (the scroll parameter and what it triggers)
+        run: node verify/scroll-verify.mjs
 
   engine:
     name: engine (${{ matrix.os }})
@@ -135,48 +130,3 @@ jobs:
             exit 0
           fi
           exit 1
-
-  session:
-    name: session (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-    steps:
-      - uses: actions/checkout@v4
-
-      # Node 24, not 22: the session tool uses the built-in WebSocket, which
-      # arrived in 21, and this also matches the publish workflow.
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-
-      # Reported so a run says which browser answered rather than leaving it to be
-      # inferred from which assertions were skipped.
-      - name: Browsers available
-        shell: bash
-        run: |
-          for c in google-chrome google-chrome-stable chromium chromium-browser microsoft-edge; do
-            command -v "$c" && "$c" --version 2>&1 || true
-          done
-          ls "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" 2>/dev/null || true
-          ls "/c/Program Files/Google/Chrome/Application/chrome.exe" 2>/dev/null || true
-
-      # The suite drives a real moli when one exists and skips otherwise, so the
-      # moli half of the comparison is a skip rather than a failure on a runner
-      # that has no engine.
-      - name: session-verify (moli backend, full action surface)
-        run: node verify/session-verify.mjs
-
-      # This one is the point: it asserts that moli refuses to click below the
-      # viewport and that a real Chromium does not. If no browser is present the
-      # chromium half is skipped and the run still passes.
-      - name: session-backends (moli versus Chromium geometry)
-        run: node verify/session-backends.mjs
-
-      # Starts its own external browser and attaches to it, so it also skips when
-      # the machine has no Chromium-family browser. It checks the ownership rules:
-      # a browser this plugin did not start is never stopped by `close`.
-      - name: session-attach-verify (external endpoints and browser ownership)
-        run: node verify/session-attach-verify.mjs
