@@ -567,6 +567,7 @@ export function apply(ctx, config) {
       pollCheck();
     }
   }, 500);
+  pollTimer.unref?.();
   // Initial state once settings is live. `ctx.get('settings')` may be null in a
   // boot-time effect (the service mounts later), so retry briefly; the poller
   // also picks up any pending engineAction written before the service settled.
@@ -581,6 +582,7 @@ export function apply(ctx, config) {
     const timer = setInterval(() => {
       if (tryInitialSync() || ++syncAttempts >= 40) clearInterval(timer);
     }, 250);
+    timer.unref?.();
   }
   }
 
