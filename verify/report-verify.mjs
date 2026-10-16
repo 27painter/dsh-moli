@@ -19,15 +19,15 @@ import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-// Same rule as schema-verify.mjs: ask npm where its global prefix is rather than
-// assuming %APPDATA%\npm or /usr/local/lib, because installers (nvm, Homebrew,
-// actions/setup-node) relocate it.
+// Same rule as schema-verify.mjs: ask npm where its global modules live
+// (`npm root -g`) rather than assuming %APPDATA%\npm or /usr/local/lib, because
+// installers -- nvm, Homebrew, actions/setup-node -- relocate the prefix.
 function findDshRoot() {
-  const npm = spawnSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['prefix', '-g'],
+  const npm = spawnSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['root', '-g'],
     { encoding: 'utf8', timeout: 60000, windowsHide: true });
-  const prefix = String(npm.stdout ?? '').trim();
+  const root = String(npm.stdout ?? '').trim();
   const candidates = [];
-  if (npm.status === 0 && prefix !== '') candidates.push(join(prefix, 'node_modules', '@deepseek-ai', 'dsh'));
+  if (npm.status === 0 && root !== '') candidates.push(join(root, '@deepseek-ai', 'dsh'));
   if (process.platform === 'win32') candidates.push(join(process.env.APPDATA ?? '', 'npm', 'node_modules', '@deepseek-ai', 'dsh'));
   else {
     candidates.push(

@@ -50,6 +50,20 @@ jobs:
       - name: Install DSH (provides the registry validator)
         run: npm install -g @deepseek-ai/dsh
 
+      # Report where the global tree actually is, so a lookup failure is
+      # diagnosable from the log instead of guessed at.
+      - name: Where is the global tree
+        shell: bash
+        run: |
+          echo "prefix     : $(npm prefix -g)"
+          echo "root       : $(npm root -g)"
+          echo "config     : $(npm config get prefix)"
+          echo "node       : $(command -v node)"
+          echo "--- npm root -g listing ---"
+          ls -la "$(npm root -g)" 2>&1 | head -20
+          echo "--- @deepseek-ai under npm root -g ---"
+          ls -la "$(npm root -g)/@deepseek-ai" 2>&1 | head -20
+
       # The c stub engines are compiled by the test itself; fail early with a
       # clear message if the runner has no compiler.
       - name: Compiler present

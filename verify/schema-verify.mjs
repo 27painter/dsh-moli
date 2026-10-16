@@ -21,27 +21,28 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 /**
  * Locate the npm-global `@deepseek-ai/dsh` package.
  *
- * Ask npm where its global prefix is instead of guessing. A candidate list was
- * the first attempt and it failed on the first CI run: `actions/setup-node`
- * relocates the global prefix, so `npm install -g` reported "added 539 packages"
- * and the lookup still found nothing under `/usr/local/lib` or `%APPDATA%\npm`.
- * `npm prefix -g` answers for every install shape -- system, nvm, Homebrew,
- * setup-node, custom -- so the list below is only a fallback for when npm cannot
- * be run at all.
+ * Ask npm where its global modules live instead of deriving it. Two earlier
+ * attempts failed in CI: a candidate list missed the tree because
+ * `actions/setup-node` relocates the global prefix (`npm install -g` reported
+ * "added 540 packages" while `/usr/local/lib` stayed empty), and building the
+ * path from `npm prefix -g` was wrong there too -- on that runner the prefix is
+ * the Node install directory, so appending `node_modules` missed. `npm root -g`
+ * answers with the modules directory directly on every install shape, and the
+ * list below is only a fallback for when npm cannot be run.
  */
 function findDshRoot() {
   const tried = [];
   const looksRight = p => existsSync(join(p, 'package.json'));
 
-  const npm = spawnSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['prefix', '-g'],
+  const npm = spawnSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['root', '-g'],
     { encoding: 'utf8', timeout: 60000, windowsHide: true });
-  const prefix = String(npm.stdout ?? '').trim();
-  if (npm.status === 0 && prefix !== '') {
-    const candidate = join(prefix, 'node_modules', '@deepseek-ai', 'dsh');
-    tried.push(`${candidate}  (from \`npm prefix -g\`)`);
+  const root = String(npm.stdout ?? '').trim();
+  if (npm.status === 0 && root !== '') {
+    const candidate = join(root, '@deepseek-ai', 'dsh');
+    tried.push(`${candidate}  (from \`npm root -g\`)`);
     if (looksRight(candidate)) return candidate;
   } else {
-    tried.push(`\`npm prefix -g\` failed: ${String(npm.error?.message ?? npm.stderr ?? '').trim().slice(0, 120)}`);
+    tried.push(`\`npm root -g\` failed: ${String(npm.error?.message ?? npm.stderr ?? '').trim().slice(0, 120)}`);
   }
 
   const fallbacks = process.platform === 'win32'
