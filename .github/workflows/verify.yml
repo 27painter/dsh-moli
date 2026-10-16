@@ -16,10 +16,9 @@ name: verify
 # Add the CI-only dependencies here as they appear.
 
 on:
-  # Manual only. The suites pass locally, but the cloud jobs were noisy while the
-  # DSH-install lookup was being worked out, and a red badge on every push buries
-  # the signal. Run this by hand from the Actions tab (or `gh workflow run verify`)
-  # once the package is published through a working credential.
+  push:
+    branches: [main]
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -47,23 +46,21 @@ jobs:
       # (`@deepseek-ai/dsh-tools`), because the plain `ctx.tools.register` path is
       # where two registration failures shipped from. It is not a dependency of the
       # plugin -- the plugin has none -- so CI installs it here. The lookup asks
-      # `npm prefix -g`, since setup-node relocates the global prefix.
+      # `npm root -g`: on this runner `npm prefix -g` reports the Node install
+      # directory, so building the path from the prefix missed a tree npm had just
+      # populated.
       - name: Install DSH (provides the registry validator)
         run: npm install -g @deepseek-ai/dsh
 
-      # Report where the global tree actually is, so a lookup failure is
-      # diagnosable from the log instead of guessed at.
-      - name: Where is the global tree
+      # Printed deliberately. A lookup failure used to cost a round trip through
+      # the logs to learn where npm had actually put the tree; this makes the
+      # answer part of the run output.
+      - name: Global install layout
         shell: bash
         run: |
-          echo "prefix     : $(npm prefix -g)"
-          echo "root       : $(npm root -g)"
-          echo "config     : $(npm config get prefix)"
-          echo "node       : $(command -v node)"
-          echo "--- npm root -g listing ---"
-          ls -la "$(npm root -g)" 2>&1 | head -20
-          echo "--- @deepseek-ai under npm root -g ---"
-          ls -la "$(npm root -g)/@deepseek-ai" 2>&1 | head -20
+          echo "npm root -g    : $(npm root -g)"
+          echo "npm prefix -g  : $(npm prefix -g)"
+          echo "@deepseek-ai   : $(ls "$(npm root -g)/@deepseek-ai" 2>&1 | tr '\n' ' ')"
 
       # The c stub engines are compiled by the test itself; fail early with a
       # clear message if the runner has no compiler.
