@@ -247,20 +247,70 @@ moli_session action=close                                # stop it and free the 
 Elements are addressed by **CSS selector**, never by pixel coordinates: the tool measures the element
 and dispatches real mouse and key events, so page handlers run exactly as they do for a person.
 
-**One thing to know before relying on `click`.** This engine's element geometry is document-absolute
-and does not follow scrolling, and its hit test is bounded by the viewport height. Measured on Moli
-1.1.16: an element at document `y=1008` reports the same `y` at `scrollY` 0, 400 and 800, while
-`elementFromPoint` stops answering past `y=1080`. The consequence is that synthetic input cannot reach
-an element below the first viewport, on any page long enough to scroll. `click` says so, naming the
-element, and points at the route that does work:
+### Choosing a browser: `moli` or `chromium`
+
+`moli_session` can drive either engine, and you choose which — there is **no automatic fallback**,
+because switching engines when one click fails would make the timing and the behaviour depend on which
+operation happened to fail, and you could not tell which browser answered.
+
+```yaml
+config:
+  sessionBrowser: moli          # moli (default) or chromium
+  sessionBrowserPath: ''        # optional path to chrome.exe / msedge.exe / brave
+  sessionPort: 9222
+```
+
+**Why the choice exists.** Moli's element geometry is document-absolute and does not follow scrolling,
+and its hit test is bounded by the viewport height. Measured on Moli 1.1.16 and Chrome 155, same page,
+same element:
+
+| | `rect.y` at scrollY 0 / 400 / 800 | click a control below the first viewport |
+|---|---|---|
+| **moli** | 1008 / 1008 / 1008 — never moves | **impossible**; synthetic input cannot reach it |
+| **chromium** | 1008 / 608 / 208 — follows the scroll | **works**; the browser scrolls to it |
+
+So moli is the good default — it is the engine this plugin wraps, it is lighter, and it is already
+installed — and a real Chromium is what you switch to when a task needs an element further down a long
+page. When moli refuses, it says so, names the element, and points at both routes:
 
 ```
+moli_session action=click selector="#far-down"
+  → "#far-down" is below the viewport (y=2548) and this engine cannot send input there
+
+# either click from inside the page (reaches it, but skips hover and focus behaviour)
 moli_session action=eval expression="document.querySelector('#far-down').click()"
+
+# or use a real browser for that session
+config: sessionBrowser: chromium
 ```
 
-`eval` runs a click inside the page and bypasses the input layer, so it reaches elements the input API
-cannot. Note that it also skips hover and focus behaviour, which is the difference between clicking a
-control and calling its handler.
+With `chromium` the plugin starts the browser it finds (Chrome, Edge or Brave, or `sessionBrowserPath`)
+in `--headless=new` mode with its own profile, so it does not touch your normal browsing profile.
+
+### Driving a browser you already have open
+
+Pass `cdpEndpoint` to attach to a CDP port instead of starting anything. This is the only way to inherit
+your own cookies and logins: start your browser with `--remote-debugging-port=9222`, then
+
+```
+moli_session action=open url=https://example.com cdpEndpoint=http://127.0.0.1:9222
+```
+
+The endpoint applies to that call only. A browser this plugin did not start is **never stopped by
+`close`**, and `status` reports `external: true` so you can tell.
+
+### `cdp` — the raw protocol escape hatch
+
+Everything the named actions do is an abstraction chosen in advance. `action=cdp` is not:
+
+```
+moli_session action=cdp method=Browser.getVersion
+moli_session action=cdp method=Network.setExtraHTTPHeaders params={"headers":{"X-Thing":"1"}}
+moli_session action=cdp method=DOM.setFileInputFiles params={"files":["/abs/a.png"],"nodeId":42}
+```
+
+It reaches what the wrapper does not: other targets, cross-origin frames, file inputs, extra headers,
+network interception. `params` may be an object or a JSON string.
 
 The session needs **Node 21 or newer** for the built-in `WebSocket`; on Node 20 the tool answers with
 that reason instead of failing obscurely. `moli_fetch` and `moli_probe` still work on 20.12.
@@ -356,6 +406,8 @@ Override any field under the plugin's `config` entry in the profile patch layer.
         maxChars: 200000                                         # inline text truncation
         proxy: 'http://127.0.0.1:7890'                           # forward proxy for moli, downloads, and the installer's engine download
         insecureTls: true                                        # see the TLS notes below
+        sessionBrowser: moli                                     # or chromium, for the session tool
+        sessionBrowserPath: ''                                   # explicit chrome.exe / msedge.exe / brave
         sessionPort: 9222                                        # CDP port for moli_session
         blockPrivateNetworks: false                              # refuse private addresses (see the note below)
         blockCidrs: []                                           # extra CIDRs to refuse
@@ -441,7 +493,16 @@ Four suites live in [`verify/`](verify/), and all are runnable against a working
   with and without clearing, press, scroll, `waitFor` in both directions, eval including a throwing
   expression, screenshot byte signature, navigation by clicking a link, restart after close, and the
   viewport limit described above — which is asserted as a limit, with the `eval` route that works
-  around it asserted next to it.
+  around it asserted next to it. It skips when no engine is installed.
+- `session-backends.mjs` is the comparison that justifies the second backend: the same page, the same
+  control below the viewport, asserted to be **refused on moli and clicked on Chromium**, plus the
+  `cdp` action on both. The Chromium half skips when the machine has no Chromium-family browser.
+- `session-attach-verify.mjs` covers external endpoints and ownership: attaching to a browser this
+  plugin did not start, identifying it correctly, refusing to stop it on `close`, and — the trap that
+  a behavioural probe got wrong — classifying an external **moli** as moli even though it answers
+  `/json/version` with `"Browser":"Chrome/145.0.0.0"`. It also asserts that naming a per-call endpoint
+  does not latch it, which an earlier version did: one call against a dead endpoint left the session
+  pointing at port 9 for the rest of the process.
 
 `.github/workflows/verify.yml` runs the first two on Linux, Windows and macOS (they need no engine and
 no network) and attempts the engine-dependent suites on Linux and Windows, reporting a missing engine

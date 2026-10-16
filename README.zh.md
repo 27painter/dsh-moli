@@ -231,17 +231,67 @@ moli_session action=close                                # 停止并释放端口
 元素一律用 **CSS 选择器**定位，不接受像素坐标：工具自己测量元素并派发真实的鼠标与键盘事件，所以页面的
 处理器会像人操作时一样执行。
 
-**依赖 `click` 之前需要知道一件事。** 这个引擎的元素几何是**文档绝对坐标且不随滚动更新**，而它的命中测试
-**受视口高度限制**。在 Moli 1.1.16 上实测：文档 `y=1008` 的元素在 `scrollY` 为 0、400、800 时报告的 `y`
-完全相同，而 `elementFromPoint` 在 `y=1080` 之后一律返回 null。后果是：**在长到需要滚动的页面上，合成输入
-无法触达首个视口以下的元素。** `click` 会如实报出这一点并点名元素，同时给出真正可行的路径：
+### 选哪个浏览器：`moli` 还是 `chromium`
+
+`moli_session` 可以驱动两种引擎，由你选择——**没有自动降级**。因为"某个点击失败就换引擎"会让工具的耗时和
+行为取决于哪一步恰好失败，而且你无法知道最后是哪个浏览器在回答。
+
+```yaml
+config:
+  sessionBrowser: moli          # moli（默认）或 chromium
+  sessionBrowserPath: ''        # 可选，指定 chrome.exe / msedge.exe / brave
+  sessionPort: 9222
+```
+
+**为什么需要这个选择。** moli 的元素几何是**文档绝对坐标且不随滚动更新**，命中测试又受视口高度限制。在
+Moli 1.1.16 与 Chrome 155 上，同一页面、同一元素实测：
+
+| | `rect.y` 在 scrollY 0 / 400 / 800 | 点击首个视口以下的控件 |
+|---|---|---|
+| **moli** | 1008 / 1008 / 1008 —— 纹丝不动 | **做不到**，合成输入触达不了 |
+| **chromium** | 1008 / 608 / 208 —— 跟随滚动 | **可以**，浏览器会滚动到它 |
+
+所以 moli 是合适的默认值——它是本插件包装的引擎、更轻、而且你已经装了；而当任务需要长页面下方的元素时，
+就换成真实 Chromium。moli 拒绝时会把原因、元素和两条出路都讲清楚：
 
 ```
+moli_session action=click selector="#far-down"
+  → "#far-down" is below the viewport (y=2548) and this engine cannot send input there
+
+# 要么在页面内部点击（能触达，但会跳过 hover 与 focus 行为）
 moli_session action=eval expression="document.querySelector('#far-down').click()"
+
+# 要么这个会话改用真实浏览器
+config: sessionBrowser: chromium
 ```
 
-`eval` 在页面内部执行点击，绕开输入层，因此能触达输入 API 达不到的元素。注意它同时跳过了 hover 与 focus
-行为——这正是"点击一个控件"与"调用它的处理器"的区别。
+选 `chromium` 时，插件会在 `--headless=new` 模式下用**独立 profile** 启动它找到的浏览器（Chrome、Edge 或
+Brave，也可用 `sessionBrowserPath` 指定），不会碰你日常使用的浏览器配置。
+
+### 驱动你自己已经开着的浏览器
+
+传 `cdpEndpoint` 即可连接到已有的 CDP 端口，什么都不启动。这是**继承你自己 cookie 与登录态的唯一途径**：
+用 `--remote-debugging-port=9222` 启动你的浏览器，然后
+
+```
+moli_session action=open url=https://example.com cdpEndpoint=http://127.0.0.1:9222
+```
+
+该端点**只对当次调用生效**。不是本插件启动的浏览器**永远不会被 `close` 关掉**，并且 `status` 会报
+`external: true` 让你能分辨。
+
+### `cdp` —— 原始协议逃生舱
+
+具名动作全都是"预先替你决定好的抽象"，而 `action=cdp` 不是：
+
+```
+moli_session action=cdp method=Browser.getVersion
+moli_session action=cdp method=Network.setExtraHTTPHeaders params={"headers":{"X-Thing":"1"}}
+moli_session action=cdp method=DOM.setFileInputFiles params={"files":["/绝对/a.png"],"nodeId":42}
+```
+
+它能做到包装层做不到的事：切换 target、跨域 iframe、文件上传、额外的请求头、网络拦截。`params` 可以是对象
+或 JSON 字符串。
 
 本工具需要 **Node 21 或更新版本**（内置 `WebSocket`）；在 Node 20 上会直接说明原因，而不是给出费解的失败。
 `moli_fetch` 与 `moli_probe` 仍支持 20.12。
@@ -324,6 +374,8 @@ cookie 驱动的查询参数。那次实测同时覆盖了代理下载路由与�
         maxChars: 200000                                         # 内联文本截断阈值
         proxy: 'http://127.0.0.1:7890'                           # 转给本地正向代理（moli、下载、安装器内部引擎下载都走它）
         insecureTls: true                                        # 见下方 TLS 说明
+        sessionBrowser: moli                                     # 或 chromium，供 session 工具使用
+        sessionBrowserPath: ''                                   # 显式指定 chrome.exe / msedge.exe / brave
         sessionPort: 9222                                        # moli_session 的 CDP 端口
         blockPrivateNetworks: false                              # 拒绝私网地址（见下方说明）
         blockCidrs: []                                           # 额外拒绝的 CIDR
@@ -387,7 +439,14 @@ profile。无论生效的是哪个代理，loopback 地址一律绕过它。
 - `session-verify.mjs` 用 `data:` URL 夹具端到端驱动 `moli_session`，因此不依赖网络、也不会因为站点变化而
   失效：生命周期与端口释放、snapshot、click、带与不带清空的 type、press、scroll、两个方向的 `waitFor`、
   含抛异常的 eval、截图字节签名、点击链接导航、关闭后重启，以及上面那条视口限制——限制被当作**限制**断言，
-  紧随其后断言真正能绕过它的 `eval` 路径。
+  紧随其后断言真正能绕过它的 `eval` 路径。未安装引擎时跳过。
+- `session-backends.mjs` 是**证明第二个后端存在必要性**的对照：同一页面、同一个视口以下的控件，断言它
+  **在 moli 上被拒绝、在 Chromium 上被点中**，并在两者上都验证 `cdp` 动作。机器上没有 Chromium 系浏览器时
+  跳过 Chromium 那半。
+- `session-attach-verify.mjs` 覆盖外部端点与归属权：连接不是本插件启动的浏览器、正确识别它、`close` 时拒绝
+  停掉它；以及那个**行为探测会搞错的陷阱**——外部端点是 **moli** 时仍判定为 moli，尽管它在 `/json/version`
+  里报的是 `"Browser":"Chrome/145.0.0.0"`。它还断言按调用传入的端点**不会粘住**——早期版本会：一次对死端点
+  的调用会让整个进程后续都指向 9 端口。
 
 `.github/workflows/verify.yml` 在 Linux、Windows、macOS 上跑前两个（无需引擎、无需网络），在 Linux 与 Windows
 上尝试依赖引擎的几套；若 runner 上没有引擎，则报告为跳过而不是失败。

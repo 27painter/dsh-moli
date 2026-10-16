@@ -21,6 +21,15 @@ if (typeof globalThis.WebSocket !== 'function') {
   process.exit(0);
 }
 
+// This suite drives the moli backend, so it needs an engine. A CI runner has none,
+// and "no engine" is a skip rather than a failure -- the same rule the engine tier
+// follows, so a missing download never hides real breakage.
+const { findMoli } = await import(pathToFileURL(join(REPO, 'lib', 'moli.js')).href);
+if (findMoli(undefined) === undefined) {
+  console.log('SKIP: no moli engine found, and this suite exercises the moli backend');
+  process.exit(0);
+}
+
 const registered = new Map();
 const { apply } = await import(pathToFileURL(join(REPO, 'index.js')).href);
 apply({ tools: { register: d => registered.set(d.name, d) }, logger: { info() {}, warn() {} } },

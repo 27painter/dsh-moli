@@ -229,7 +229,7 @@ function renderProbe(_args, value) {
 }
 
 /** Actions `moli_session` accepts. */
-const SESSION_ACTIONS = ['start', 'open', 'snapshot', 'click', 'type', 'press', 'scroll', 'waitFor', 'eval', 'screenshot', 'status', 'close'];
+const SESSION_ACTIONS = ['start', 'open', 'snapshot', 'click', 'type', 'press', 'scroll', 'waitFor', 'eval', 'cdp', 'screenshot', 'status', 'close'];
 
 /**
  * Parameters of `moli_session`.
@@ -248,7 +248,8 @@ const SESSION_PARAMETERS = {
       enum: SESSION_ACTIONS,
       description: 'start: ensure the browser is running. open: navigate. snapshot: read the rendered page. '
         + 'click/type/press/scroll: interact. waitFor: wait for a selector to appear or disappear. '
-        + 'eval: run JavaScript in the page. screenshot: write a PNG. status: report the session. close: stop the browser.',
+        + 'eval: run JavaScript in the page. cdp: send a raw Chrome DevTools Protocol command. '
+        + 'screenshot: write a PNG. status: report the session and which browser it uses. close: stop the browser.',
     },
     url: { type: 'string', description: 'open: absolute http:// or https:// URL to navigate to.' },
     selector: { type: 'string', description: 'CSS selector for click, type, scroll and waitFor.' },
@@ -260,12 +261,18 @@ const SESSION_PARAMETERS = {
     block: { type: 'string', enum: ['start', 'center', 'end', 'nearest'], description: 'scroll: where to align the element. Defaults to center.' },
     state: { type: 'string', enum: ['attached', 'detached'], description: 'waitFor: wait for the selector to appear (attached) or vanish (detached).' },
     expression: { type: 'string', description: 'eval: a JavaScript expression; promises are awaited and the value is returned.' },
+    method: { type: 'string', description: 'cdp: the protocol method to invoke, e.g. "Network.enable" or "DOM.setFileInputFiles".' },
+    params: { description: 'cdp: the method parameters, as an object or a JSON string. Optional.' },
     writeTo: { type: 'string', description: 'screenshot: absolute path for the PNG. Required, since images are not returned inline.' },
     format: { type: 'string', enum: ['png', 'jpeg'], description: 'screenshot: image format. Defaults to png.' },
     includeHtml: { type: 'boolean', description: 'snapshot: also return the rendered HTML.' },
-    maxChars: { type: 'integer', description: 'snapshot: truncate the text to this many characters.' },
+    maxChars: { type: 'integer', description: 'snapshot and cdp: truncate text output to this many characters.' },
     timeoutMs: { type: 'integer', description: 'Deadline for this action. Defaults to the plugin configuration.' },
     port: { type: 'integer', description: 'start: CDP port. Defaults to the plugin configuration (9222).' },
+    cdpEndpoint: {
+      type: 'string',
+      description: 'Attach to a browser that is already running, e.g. "http://127.0.0.1:9222", instead of starting one. This is how you drive your own Chrome with its logins: start it with --remote-debugging-port and pass that URL.',
+    },
   },
 };
 
@@ -301,6 +308,12 @@ const SESSION_OUTPUT_SCHEMA = {
     path: { type: 'string' },
     bytes: { type: 'integer' },
     format: { type: 'string' },
+    method: { type: 'string' },
+    result: {},
+    bytes: { type: 'integer' },
+    backend: { type: 'string' },
+    geometry: { type: 'string' },
+    browserVersion: { type: 'string' },
     running: { type: 'boolean' },
     ownedByThisPlugin: { type: 'boolean' },
     external: { type: 'boolean' },
@@ -310,6 +323,7 @@ const SESSION_OUTPUT_SCHEMA = {
     settled: { type: 'boolean' },
     settledMs: { type: 'integer' },
     stopped: { type: 'boolean' },
+    scope: { type: 'string' },
   },
 };
 
@@ -344,12 +358,21 @@ function renderSession(_args, value) {
     return [{ type: 'text', text: lines.join('\n') }];
   }
   if (value.action === 'status') {
-    return [{
-      type: 'text',
-      text: value.running === true
-        ? `Session running at ${String(value.endpoint)}${value.external === true ? ' (started outside this plugin, so close will not stop it)' : ''}${value.url === undefined ? '' : `\nCurrent page: ${String(value.title)} — ${String(value.url)}`}`
-        : 'No session is running. Call moli_session with action "start" or "open" to launch one.',
-    }];
+    if (value.running !== true) {
+      return [{ type: 'text', text: 'No session is running. Call moli_session with action "start" or "open" to launch one.' }];
+    }
+    const lines = [
+      `Session running: ${String(value.backend)} (${String(value.browserVersion ?? 'version unknown')}) at ${String(value.endpoint)}`,
+    ];
+    if (value.geometry === 'absolute') {
+      lines.push('Geometry: moli\'s document-absolute frame — element input cannot reach below the first viewport. Use `browser: "chromium"` to lift that, or eval to click in the page.');
+    }
+    if (value.external === true) lines.push('Started outside this plugin, so close will not stop it.');
+    if (value.url !== undefined) lines.push(`Current page: ${String(value.title)} — ${String(value.url)}`);
+    return [{ type: 'text', text: lines.join('\n') }];
+  }
+  if (value.action === 'cdp') {
+    return [{ type: 'text', text: `${String(value.method)} → ${String(value.serialized ?? '').slice(0, 4000)}` }];
   }
   if (value.action === 'click') {
     return [{
@@ -513,6 +536,13 @@ export function apply(ctx, config) {
   // load time, so a plugin load cannot delay Host startup or open a port.
   const session = new SessionManager({
     get exe() { return cachedExe; },
+    // Which browser drives a session. Explicit, never automatic: switching engines
+    // because one click failed would make the timing and the behaviour depend on
+    // which operation happened to fail, and the caller could not tell which browser
+    // it was talking to.
+    browser: options.sessionBrowser ?? 'moli',
+    browserPath: options.sessionBrowserPath,
+    cdpEndpoint: options.sessionCdpEndpoint,
     port: options.sessionPort ?? 9222,
     host: '127.0.0.1',
     insecureTls,
@@ -544,29 +574,40 @@ export function apply(ctx, config) {
     // navigate the page out from under each other.
     isConcurrencySafe: () => false,
     async execute(args, exec) {
+      // A per-call endpoint is honoured by every action, including the ones that
+      // never reach `performAction`. Routing `close` through it is not cosmetic:
+      // `withEndpoint` is what marks the connection external, and `close` refuses
+      // to stop an external browser. Answering `close` before that mark existed
+      // meant a call that had just attached to the user's own Chrome could shut it
+      // down -- the one thing this design promises not to do.
+      const withCallEndpoint = work => (typeof args.cdpEndpoint === 'string' && args.cdpEndpoint !== ''
+        ? session.withEndpoint(args.cdpEndpoint, work)
+        : work());
+
       // `status` and `close` are meaningful with nothing running, so they are
       // answered before the engine is required.
       if (args.action === 'close') {
-        const outcome = await session.close();
-        return { ok: true, action: 'close', ...outcome };
+        return withCallEndpoint(async () => ({ ok: true, action: 'close', ...(await session.close()) }));
       }
       if (args.action === 'status') {
-        const state = await session.status();
-        return { ok: true, action: 'status', ...state };
+        return withCallEndpoint(async () => ({ ok: true, action: 'status', ...(await session.status()) }));
       }
       if (args.action === 'start') {
         if (!sessionSupported()) return { ok: false, action: 'start', error: sessionUnsupportedReason() };
-        const { external } = await session.ensure();
-        const state = await session.status();
-        return { ok: true, action: 'start', started: true, external, ...state };
+        return withCallEndpoint(async () => {
+          const { external, backend, geometry } = await session.ensure();
+          const state = await session.status();
+          return { ok: true, action: 'start', started: true, external, backend, geometry, ...state };
+        });
       }
 
-      if (engine() === undefined) {
+      if (engine() === undefined && (options.sessionBrowser ?? 'moli') === 'moli'
+        && (options.sessionCdpEndpoint === undefined || options.sessionCdpEndpoint === '')) {
         return {
           ok: false,
           action: String(args.action),
-          error: 'moli was not found, so a session cannot be started',
-          hint: 'Call moli_probe with action "install", or set the plugin config field `exePath`.',
+          error: 'moli was not found, so a moli session cannot be started',
+          hint: 'Call moli_probe with action "install", set the plugin config field `exePath`, or set `sessionBrowser: "chromium"` to drive the browser you already have.',
         };
       }
       if (!sessionSupported()) return { ok: false, action: String(args.action), error: sessionUnsupportedReason() };
@@ -574,23 +615,43 @@ export function apply(ctx, config) {
       if (exec?.signal?.aborted === true) return { ok: false, action: String(args.action), error: 'the call was aborted before it started' };
 
       try {
-        const { connection } = await session.ensure();
-        const result = await performAction(connection, args, { maxChars });
-        // A closed socket means the browser went away under us; drop it so the
-        // next call starts a fresh one instead of failing forever.
-        if (connection.closed === true) void session.close();
-        return result;
+        const perform = async ({ connection, geometry, backend }) => {
+          try {
+            return await performAction(connection, args, { maxChars, geometry, backend });
+          } finally {
+            // A closed socket means the browser went away under us; drop it so the
+            // next call starts a fresh one instead of failing forever.
+            if (connection.closed === true) void session.close();
+          }
+        };
+        // A per-call endpoint drives a browser the caller already has open, which is
+        // the only way to inherit their logins. It is scoped to this call: an
+        // endpoint that latched would make one bad call poison every later one.
+        if (typeof args.cdpEndpoint === 'string' && args.cdpEndpoint !== '') {
+          return await session.withEndpoint(args.cdpEndpoint, perform);
+        }
+        return await perform(await session.ensure());
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         const hint = /timed out/u.test(message)
           ? 'The action exceeded its deadline. Raise timeoutMs, or check `waitFor` for a selector that never appears.'
-          : /ECONNREFUSED|closed|WebSocket/u.test(message)
-            ? 'The browser connection was lost. Call moli_session with action "status", then "start" to relaunch it.'
-            : undefined;
+          : /no Chromium-family browser/u.test(message)
+            ? 'Install Chrome, Edge or Brave, or set the plugin config field `sessionBrowserPath` to a browser executable.'
+            : /ECONNREFUSED|closed|WebSocket/u.test(message)
+              ? 'The browser connection was lost. Call moli_session with action "status", then "start" to relaunch it.'
+              : undefined;
         return { ok: false, action: String(args.action), error: message, ...(hint === undefined ? {} : { hint }) };
       }
     },
   });
+
+  // A serve process or a headless browser outlives a tool call, so it must be tied
+  // to the plugin's lifetime rather than left to the OS. Cordis disposes listeners
+  // registered through `ctx.on` together with the plugin's fiber, so registering
+  // one is enough; the returned disposer is not needed here.
+  if (typeof ctx.on === 'function') {
+    ctx.on('dispose', () => { void session.close(); });
+  }
 
   ctx.logger?.info?.(`dsh-moli: registered moli_fetch, moli_probe and moli_session (${cachedExe ?? 'moli missing'})`);
 }
