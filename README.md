@@ -223,6 +223,52 @@ moli_fetch url=https://example.com dump=pdf        writeTo=/abs/path/a.pdf
 
 Screenshot and PDF dumps need `writeTo`; the bytes are written verbatim rather than printed.
 
+### `moli_session` — an interactive browser
+
+`moli_fetch` loads a page and prints it. That covers reading, and nothing else: it cannot dismiss a
+consent wall, fill a search box, scroll a lazy list, or wait for a client-side route to change.
+`moli_session` drives a persistent browser instead, over the Chrome DevTools Protocol endpoint that
+`moli serve` publishes. State — cookies, navigation, typed input — survives between calls until you
+stop it.
+
+```
+moli_session action=open  url=https://example.com        # start the browser and navigate
+moli_session action=snapshot                             # the rendered page as text
+moli_session action=click selector="#accept-cookies"
+moli_session action=type  selector="#q" text="moli" submit=true
+moli_session action=scroll dy=1200
+moli_session action=waitFor selector=".results"
+moli_session action=eval  expression="document.title"
+moli_session action=screenshot writeTo=/abs/path/a.png
+moli_session action=status                               # is it running, and on what page
+moli_session action=close                                # stop it and free the port
+```
+
+Elements are addressed by **CSS selector**, never by pixel coordinates: the tool measures the element
+and dispatches real mouse and key events, so page handlers run exactly as they do for a person.
+
+**One thing to know before relying on `click`.** This engine's element geometry is document-absolute
+and does not follow scrolling, and its hit test is bounded by the viewport height. Measured on Moli
+1.1.16: an element at document `y=1008` reports the same `y` at `scrollY` 0, 400 and 800, while
+`elementFromPoint` stops answering past `y=1080`. The consequence is that synthetic input cannot reach
+an element below the first viewport, on any page long enough to scroll. `click` says so, naming the
+element, and points at the route that does work:
+
+```
+moli_session action=eval expression="document.querySelector('#far-down').click()"
+```
+
+`eval` runs a click inside the page and bypasses the input layer, so it reaches elements the input API
+cannot. Note that it also skips hover and focus behaviour, which is the difference between clicking a
+control and calling its handler.
+
+The session needs **Node 21 or newer** for the built-in `WebSocket`; on Node 20 the tool answers with
+that reason instead of failing obscurely. `moli_fetch` and `moli_probe` still work on 20.12.
+
+`moli_session` also takes `port` (default 9222). If that port is already served by a `moli serve` you
+started yourself, the tool connects to it rather than failing to bind — and `close` then leaves it
+alone, because it is not ours to stop.
+
 ## Relationship to Moli's own agent skills
 
 Moli ships official agent skills in its repository — [`moli-webfetch`](https://github.com/lexmount/moli/tree/main/skills/moli-webfetch),
@@ -310,11 +356,23 @@ Override any field under the plugin's `config` entry in the profile patch layer.
         maxChars: 200000                                         # inline text truncation
         proxy: 'http://127.0.0.1:7890'                           # forward proxy for moli, downloads, and the installer's engine download
         insecureTls: true                                        # see the TLS notes below
+        sessionPort: 9222                                        # CDP port for moli_session
+        blockPrivateNetworks: false                              # refuse private addresses (see the note below)
+        blockCidrs: []                                           # extra CIDRs to refuse
 ```
 
 The plugin-level `proxy` above is the default; `moli_fetch` also takes a `proxy` argument, so a single
 call can route through a different proxy without changing the profile. A loopback URL always bypasses
 whichever proxy is in effect.
+
+`blockPrivateNetworks` is **off by default, matching the engine**: `moli fetch http://10.0.0.1/` reaches
+a private address, so the plugin does not silently narrow what the moli you installed already does.
+Turn it on, or list `blockCidrs`, when the agent is following links on pages you do not control and
+you want the engine to refuse private destinations. Two caveats worth knowing before you rely on it:
+moli documents the policy as applying to **directly connected** targets, so a configured `proxy`
+routes around it, and only `blockCidrs` (which the proxy must enforce) covers that path. The sharpest
+target this protects is the cloud metadata address `169.254.169.254`, which hands out instance
+credentials on a VM.
 
 Without `exePath`, the plugin probes `exePath` → `MOLI_BIN` → `%LOCALAPPDATA%\Moli\bin\moli.exe` →
 `%USERPROFILE%\.local\bin\moli.exe`, then scans inside `%LOCALAPPDATA%\Moli` for a `moli.exe`, so an
@@ -378,6 +436,12 @@ Four suites live in [`verify/`](verify/), and all are runnable against a working
   `dump` discards its value, an expression that throws is classified as such instead of being blamed
   on the installation, truncation keeps the tail as well as the head, `proxy` is a per-call parameter,
   and `moli_probe` states which process its `httpsOk` describes.
+- `session-verify.mjs` drives `moli_session` end to end against a `data:` URL fixture, so it needs no
+  network and no site stays still underneath it: lifecycle and port release, snapshot, click, type
+  with and without clearing, press, scroll, `waitFor` in both directions, eval including a throwing
+  expression, screenshot byte signature, navigation by clicking a link, restart after close, and the
+  viewport limit described above — which is asserted as a limit, with the `eval` route that works
+  around it asserted next to it.
 
 `.github/workflows/verify.yml` runs the first two on Linux, Windows and macOS (they need no engine and
 no network) and attempts the engine-dependent suites on Linux and Windows, reporting a missing engine

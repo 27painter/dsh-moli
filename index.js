@@ -1,6 +1,8 @@
 /** Host half of dsh-moli: expose the local `moli` headless browser as callable tools. */
+import { performAction } from './lib/actions.js';
 import { MANUAL_INSTALL, installMoli } from './lib/install.js';
 import { findMoli, moliCandidates, probe, runFetch } from './lib/moli.js';
+import { SessionManager, sessionSupported, sessionUnsupportedReason } from './lib/session.js';
 
 export const name = 'dsh-moli';
 export const inject = ['tools'];
@@ -226,6 +228,151 @@ function renderProbe(_args, value) {
   return [{ type: 'text', text: lines.join('\n') }];
 }
 
+/** Actions `moli_session` accepts. */
+const SESSION_ACTIONS = ['start', 'open', 'snapshot', 'click', 'type', 'press', 'scroll', 'waitFor', 'eval', 'screenshot', 'status', 'close'];
+
+/**
+ * Parameters of `moli_session`.
+ *
+ * Raw JSON Schema with a root `type: "object"`, like the other tools: `schemaOf`
+ * projects this straight to the provider, so the author DSL would arrive as
+ * `type: null` and be rejected.
+ */
+const SESSION_PARAMETERS = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['action'],
+  properties: {
+    action: {
+      type: 'string',
+      enum: SESSION_ACTIONS,
+      description: 'start: ensure the browser is running. open: navigate. snapshot: read the rendered page. '
+        + 'click/type/press/scroll: interact. waitFor: wait for a selector to appear or disappear. '
+        + 'eval: run JavaScript in the page. screenshot: write a PNG. status: report the session. close: stop the browser.',
+    },
+    url: { type: 'string', description: 'open: absolute http:// or https:// URL to navigate to.' },
+    selector: { type: 'string', description: 'CSS selector for click, type, scroll and waitFor.' },
+    text: { type: 'string', description: 'type: the text to enter.' },
+    submit: { type: 'boolean', description: 'type: press Enter after entering the text.' },
+    clear: { type: 'boolean', description: 'type: empty the field before entering text.' },
+    key: { type: 'string', description: 'press: key name, e.g. Enter, Tab, Escape, ArrowDown.' },
+    dy: { type: 'number', description: 'scroll: pixels to move down (negative moves up). Defaults to 800.' },
+    block: { type: 'string', enum: ['start', 'center', 'end', 'nearest'], description: 'scroll: where to align the element. Defaults to center.' },
+    state: { type: 'string', enum: ['attached', 'detached'], description: 'waitFor: wait for the selector to appear (attached) or vanish (detached).' },
+    expression: { type: 'string', description: 'eval: a JavaScript expression; promises are awaited and the value is returned.' },
+    writeTo: { type: 'string', description: 'screenshot: absolute path for the PNG. Required, since images are not returned inline.' },
+    format: { type: 'string', enum: ['png', 'jpeg'], description: 'screenshot: image format. Defaults to png.' },
+    includeHtml: { type: 'boolean', description: 'snapshot: also return the rendered HTML.' },
+    maxChars: { type: 'integer', description: 'snapshot: truncate the text to this many characters.' },
+    timeoutMs: { type: 'integer', description: 'Deadline for this action. Defaults to the plugin configuration.' },
+    port: { type: 'integer', description: 'start: CDP port. Defaults to the plugin configuration (9222).' },
+  },
+};
+
+const SESSION_OUTPUT_SCHEMA = {
+  type: 'object',
+  additionalProperties: true,
+  required: ['ok'],
+  properties: {
+    ok: { type: 'boolean' },
+    action: { type: 'string' },
+    error: { type: 'string' },
+    hint: { type: 'string' },
+    url: { type: 'string' },
+    title: { type: 'string' },
+    text: { type: 'string' },
+    chars: { type: 'integer' },
+    truncated: { type: 'boolean' },
+    links: { type: 'array', items: { type: 'object', additionalProperties: true } },
+    fields: { type: 'array', items: { type: 'object', additionalProperties: true } },
+    html: { type: 'string' },
+    selector: { type: 'string' },
+    clicked: { type: 'object', additionalProperties: true },
+    navigated: { type: 'boolean' },
+    submitted: { type: 'boolean' },
+    value: {},
+    serialized: { type: 'string' },
+    key: { type: 'string' },
+    y: { type: 'number' },
+    height: { type: 'number' },
+    viewport: { type: 'number' },
+    state: { type: 'string' },
+    waitedMs: { type: 'integer' },
+    path: { type: 'string' },
+    bytes: { type: 'integer' },
+    format: { type: 'string' },
+    running: { type: 'boolean' },
+    ownedByThisPlugin: { type: 'boolean' },
+    external: { type: 'boolean' },
+    pid: { type: 'integer' },
+    endpoint: { type: 'string' },
+    logPath: { type: 'string' },
+    settled: { type: 'boolean' },
+    settledMs: { type: 'integer' },
+    stopped: { type: 'boolean' },
+  },
+};
+
+/**
+ * Render a `moli_session` value for the model.
+ *
+ * A snapshot is the one result worth formatting rather than dumping as JSON: the
+ * link and field tables are what the next action usually depends on.
+ *
+ * @param _args - the call arguments, unused.
+ * @param value - the canonical result value.
+ * @returns result content blocks.
+ */
+function renderSession(_args, value) {
+  if (value.ok !== true) {
+    const lines = [`moli_session failed${typeof value.action === 'string' ? ` (${value.action})` : ''}: ${value.error ?? 'unknown error'}`];
+    if (typeof value.hint === 'string' && value.hint !== '') lines.push(value.hint);
+    if (typeof value.bytes === 'number') lines.push(`(the image was ${String(value.bytes)} bytes but could not be written)`);
+    return [{ type: 'text', text: lines.join('\n') }];
+  }
+  if (value.action === 'snapshot') {
+    const lines = [`${String(value.title)} — ${String(value.url)}`, ''];
+    lines.push(String(value.text ?? ''));
+    if (Array.isArray(value.links) && value.links.length > 0) {
+      lines.push('', `Links (${String(value.links.length)}):`);
+      for (const link of value.links.slice(0, 25)) lines.push(`  ${String(link.text)} -> ${String(link.href)}`);
+    }
+    if (Array.isArray(value.fields) && value.fields.length > 0) {
+      lines.push('', `Fields (${String(value.fields.length)}):`);
+      for (const field of value.fields.slice(0, 25)) lines.push(`  <${String(field.tag)}${field.type === '' ? '' : ` type=${String(field.type)}`}${field.name === '' ? '' : ` name=${String(field.name)}`}${field.id === '' ? '' : ` id=${String(field.id)}`}>`);
+    }
+    return [{ type: 'text', text: lines.join('\n') }];
+  }
+  if (value.action === 'status') {
+    return [{
+      type: 'text',
+      text: value.running === true
+        ? `Session running at ${String(value.endpoint)}${value.external === true ? ' (started outside this plugin, so close will not stop it)' : ''}${value.url === undefined ? '' : `\nCurrent page: ${String(value.title)} — ${String(value.url)}`}`
+        : 'No session is running. Call moli_session with action "start" or "open" to launch one.',
+    }];
+  }
+  if (value.action === 'click') {
+    return [{
+      type: 'text',
+      text: `Clicked ${String(value.clicked?.tag ?? 'element')}${value.clicked?.text === undefined || value.clicked.text === '' ? '' : ` (“${String(value.clicked.text)}”)`}`
+        + `${value.navigated === true ? `, which navigated to ${String(value.url)}` : '; the page did not navigate'}`,
+    }];
+  }
+  if (value.action === 'type') {
+    return [{ type: 'text', text: `Entered text${value.submitted === true ? ' and pressed Enter' : ''}; the field now reads ${JSON.stringify(String(value.value ?? ''))}` }];
+  }
+  if (value.action === 'screenshot') {
+    return [{ type: 'text', text: `Screenshot written to ${String(value.path)} (${String(value.bytes)} bytes). Read that file to see it.` }];
+  }
+  if (value.action === 'eval') {
+    return [{ type: 'text', text: String(value.serialized ?? '') }];
+  }
+  if (value.action === 'close') {
+    return [{ type: 'text', text: value.stopped === true ? 'Session stopped.' : 'Nothing to stop: no session was running that this plugin started.' }];
+  }
+  return [{ type: 'text', text: JSON.stringify(value) }];
+}
+
 /**
  * Register the Moli tools.
  *
@@ -355,5 +502,95 @@ export function apply(ctx, config) {
     },
   });
 
-  ctx.logger?.info?.(`dsh-moli: registered moli_fetch and moli_probe (${cachedExe ?? 'moli missing'})`);
+  // ---------------------------------------------------------------------------
+  // moli_session: an interactive browser, for the work a one-shot fetch cannot do
+  // ---------------------------------------------------------------------------
+  //
+  // This is the plugin's only stateful tool. `moli serve` is a long-lived child
+  // that has to outlive a single call, so one manager is created per plugin
+  // instance and its lifecycle is explicit (`start` implicitly, `close` by hand).
+  // Registration stays synchronous: the server is spawned on first use, never at
+  // load time, so a plugin load cannot delay Host startup or open a port.
+  const session = new SessionManager({
+    get exe() { return cachedExe; },
+    port: options.sessionPort ?? 9222,
+    host: '127.0.0.1',
+    insecureTls,
+    proxy: options.proxy,
+    userAgent: options.sessionUserAgent,
+    profileDir: options.profileDir,
+    resources: options.sessionResources === true,
+    // Off, matching the engine's own default: `moli fetch <private-ip>` can reach
+    // a private address, so the plugin does not silently narrow what a user's
+    // installed engine already does. Set it to true, or pass blockCidrs, to have
+    // the engine refuse private addresses for directly connected targets.
+    blockPrivateNetworks: options.blockPrivateNetworks === true,
+    blockCidrs: Array.isArray(options.blockCidrs) ? options.blockCidrs : [],
+    startTimeoutMs: options.sessionStartTimeoutMs ?? 20000,
+  });
+
+  ctx.tools.register({
+    name: 'moli_session',
+    description: 'Drive an interactive browser through a persistent session, for what a one-shot fetch cannot'
+      + ' do: click through consent walls, fill and submit a search box, scroll a lazy list, wait for a'
+      + ' client-side route change, or run a script in the page. Keeps one browser alive across calls, so'
+      + ' state (cookies, navigation, form input) persists until you stop it with action "close".'
+      + ' Start with "open"; read the page with "snapshot"; interact with "click", "type", "press" and'
+      + ' "scroll"; use "eval" as the escape hatch. Elements are addressed by CSS selector, never by pixel'
+      + ' coordinates.',
+    parameters: SESSION_PARAMETERS,
+    output: { schema: SESSION_OUTPUT_SCHEMA, render: renderSession },
+    // One browser, one page: overlapping actions would interleave input events and
+    // navigate the page out from under each other.
+    isConcurrencySafe: () => false,
+    async execute(args, exec) {
+      // `status` and `close` are meaningful with nothing running, so they are
+      // answered before the engine is required.
+      if (args.action === 'close') {
+        const outcome = await session.close();
+        return { ok: true, action: 'close', ...outcome };
+      }
+      if (args.action === 'status') {
+        const state = await session.status();
+        return { ok: true, action: 'status', ...state };
+      }
+      if (args.action === 'start') {
+        if (!sessionSupported()) return { ok: false, action: 'start', error: sessionUnsupportedReason() };
+        const { external } = await session.ensure();
+        const state = await session.status();
+        return { ok: true, action: 'start', started: true, external, ...state };
+      }
+
+      if (engine() === undefined) {
+        return {
+          ok: false,
+          action: String(args.action),
+          error: 'moli was not found, so a session cannot be started',
+          hint: 'Call moli_probe with action "install", or set the plugin config field `exePath`.',
+        };
+      }
+      if (!sessionSupported()) return { ok: false, action: String(args.action), error: sessionUnsupportedReason() };
+
+      if (exec?.signal?.aborted === true) return { ok: false, action: String(args.action), error: 'the call was aborted before it started' };
+
+      try {
+        const { connection } = await session.ensure();
+        const result = await performAction(connection, args, { maxChars });
+        // A closed socket means the browser went away under us; drop it so the
+        // next call starts a fresh one instead of failing forever.
+        if (connection.closed === true) void session.close();
+        return result;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const hint = /timed out/u.test(message)
+          ? 'The action exceeded its deadline. Raise timeoutMs, or check `waitFor` for a selector that never appears.'
+          : /ECONNREFUSED|closed|WebSocket/u.test(message)
+            ? 'The browser connection was lost. Call moli_session with action "status", then "start" to relaunch it.'
+            : undefined;
+        return { ok: false, action: String(args.action), error: message, ...(hint === undefined ? {} : { hint }) };
+      }
+    },
+  });
+
+  ctx.logger?.info?.(`dsh-moli: registered moli_fetch, moli_probe and moli_session (${cachedExe ?? 'moli missing'})`);
 }

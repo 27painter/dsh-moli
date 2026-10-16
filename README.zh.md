@@ -209,6 +209,46 @@ moli_fetch url=https://example.com dump=pdf        writeTo=/绝对路径/a.pdf
 
 截图与 PDF 必须给 `writeTo`；字节是原样落盘的，不会打印到输出里。
 
+### `moli_session` —— 可交互的浏览器
+
+`moli_fetch` 是"加载一页、打印出来"，只能读。它点不掉同意墙、填不了搜索框、滚不动懒加载列表，也等不到
+客户端路由切换。`moli_session` 驱动的是一个**常驻浏览器**，走 `moli serve` 暴露的 Chrome DevTools
+Protocol。状态（cookie、导航位置、已输入的内容）在多次调用之间保持，直到你显式停止。
+
+```
+moli_session action=open  url=https://example.com        # 启动浏览器并导航
+moli_session action=snapshot                             # 渲染后的页面文本
+moli_session action=click selector="#accept-cookies"
+moli_session action=type  selector="#q" text="moli" submit=true
+moli_session action=scroll dy=1200
+moli_session action=waitFor selector=".results"
+moli_session action=eval  expression="document.title"
+moli_session action=screenshot writeTo=/绝对路径/a.png
+moli_session action=status                               # 是否在运行、当前在哪一页
+moli_session action=close                                # 停止并释放端口
+```
+
+元素一律用 **CSS 选择器**定位，不接受像素坐标：工具自己测量元素并派发真实的鼠标与键盘事件，所以页面的
+处理器会像人操作时一样执行。
+
+**依赖 `click` 之前需要知道一件事。** 这个引擎的元素几何是**文档绝对坐标且不随滚动更新**，而它的命中测试
+**受视口高度限制**。在 Moli 1.1.16 上实测：文档 `y=1008` 的元素在 `scrollY` 为 0、400、800 时报告的 `y`
+完全相同，而 `elementFromPoint` 在 `y=1080` 之后一律返回 null。后果是：**在长到需要滚动的页面上，合成输入
+无法触达首个视口以下的元素。** `click` 会如实报出这一点并点名元素，同时给出真正可行的路径：
+
+```
+moli_session action=eval expression="document.querySelector('#far-down').click()"
+```
+
+`eval` 在页面内部执行点击，绕开输入层，因此能触达输入 API 达不到的元素。注意它同时跳过了 hover 与 focus
+行为——这正是"点击一个控件"与"调用它的处理器"的区别。
+
+本工具需要 **Node 21 或更新版本**（内置 `WebSocket`）；在 Node 20 上会直接说明原因，而不是给出费解的失败。
+`moli_fetch` 与 `moli_probe` 仍支持 20.12。
+
+`moli_session` 也接受 `port`（默认 9222）。如果该端口已经由你自己启动的 `moli serve` 占用，工具会连接它
+而不是绑定失败——此时 `close` **不会**停掉它，因为那不是我们的进程。
+
 ## 与 Moli 官方 agent skill 的关系
 
 Moli 仓库自带官方 agent skill：[`moli-webfetch`](https://github.com/lexmount/moli/tree/main/skills/moli-webfetch)、
@@ -284,10 +324,19 @@ cookie 驱动的查询参数。那次实测同时覆盖了代理下载路由与�
         maxChars: 200000                                         # 内联文本截断阈值
         proxy: 'http://127.0.0.1:7890'                           # 转给本地正向代理（moli、下载、安装器内部引擎下载都走它）
         insecureTls: true                                        # 见下方 TLS 说明
+        sessionPort: 9222                                        # moli_session 的 CDP 端口
+        blockPrivateNetworks: false                              # 拒绝私网地址（见下方说明）
+        blockCidrs: []                                           # 额外拒绝的 CIDR
 ```
 
 上面配置里的 `proxy` 是默认值；`moli_fetch` 也能接收 `proxy` 参数，因此单次调用可以走另一个代理而不必改
 profile。无论生效的是哪个代理，loopback 地址一律绕过它。
+
+`blockPrivateNetworks` **默认关闭，与引擎一致**：`moli fetch http://10.0.0.1/` 本来就能访问私网地址，插件
+不会悄悄收窄你已安装的 moli 的能力。当 agent 会在你无法控制的页面上跟着链接走、而你希望引擎拒绝私网目标时，
+再打开它或配置 `blockCidrs`。依赖它之前有两点需要知道：moli 文档写明该策略只作用于**直连**目标，因此配置了
+`proxy` 就会绕过它，只有 `blockCidrs`（由代理执行）能覆盖那条路径。这个开关保护的最锐利目标是云元数据地址
+`169.254.169.254`——在虚拟机上它会交出实例凭据。
 
 未设置 `exePath` 时探测顺序：`exePath` → 环境变量 `MOLI_BIN` → `%LOCALAPPDATA%\Moli\bin\moli.exe`
 → `%USERPROFILE%\.local\bin\moli.exe`，随后还会在 `%LOCALAPPDATA%\Moli` 内递归查找 `moli.exe`，
@@ -335,6 +384,10 @@ profile。无论生效的是哪个代理，loopback 地址一律绕过它。
 - `report-verify.mjs` 守住一份使用体验报告里的发现：`eval` 与 `dump` 同用会丢弃表达式值（已在参数描述里
   写明）、表达式抛异常时被正确归类而不是甩锅给"安装有问题"、截断同时保留头尾、`proxy` 是可按调用传入的参数、
   以及 `moli_probe` 会说明它的 `httpsOk` 描述的是哪个进程。
+- `session-verify.mjs` 用 `data:` URL 夹具端到端驱动 `moli_session`，因此不依赖网络、也不会因为站点变化而
+  失效：生命周期与端口释放、snapshot、click、带与不带清空的 type、press、scroll、两个方向的 `waitFor`、
+  含抛异常的 eval、截图字节签名、点击链接导航、关闭后重启，以及上面那条视口限制——限制被当作**限制**断言，
+  紧随其后断言真正能绕过它的 `eval` 路径。
 
 `.github/workflows/verify.yml` 在 Linux、Windows、macOS 上跑前两个（无需引擎、无需网络），在 Linux 与 Windows
 上尝试依赖引擎的几套；若 runner 上没有引擎，则报告为跳过而不是失败。

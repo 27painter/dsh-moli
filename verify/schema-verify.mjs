@@ -167,12 +167,35 @@ for (const [name, def] of registered) {
   // not exist.
   const declared = Array.isArray(p.required) ? p.required : [];
   if (declared.length > 0) {
+    // Build a value that actually satisfies each declaration. An enum member must
+    // be one of its values -- supplying the literal 'x' made moli_session's
+    // required `action` fail validation, which was a defect in this probe rather
+    // than in the schema. `oneOf`/`anyOf` are not used by these tools; if one
+    // appears, its first branch is tried.
+    const sampleFor = (name, schema) => {
+      let s = schema ?? {};
+      if (Array.isArray(s.oneOf) && s.oneOf.length > 0) s = s.oneOf[0];
+      if (Array.isArray(s.anyOf) && s.anyOf.length > 0) s = s.anyOf[0];
+      if (Array.isArray(s.enum) && s.enum.length > 0) return s.enum[0];
+      if (s.type === 'string') return name === 'url' ? 'https://example.com' : 'x';
+      if (s.type === 'integer' || s.type === 'number') return 1;
+      if (s.type === 'boolean') return true;
+      if (s.type === 'array') return [];
+      return 'x';
+    };
+    const goodArgs = Object.fromEntries(declared.map(k => [k, sampleFor(k, (p.properties ?? {})[k])]));
+
     const missing = validateJsonSchemaValue(p, {});
     check(`declared required (${declared.join(',')}) is enforced`, missing.length > 0, JSON.stringify(missing).slice(0, 80));
-    const good = validateJsonSchemaValue(p, Object.fromEntries(declared.map(k => [k, k === 'url' ? 'https://example.com' : 'x'])));
-    check('a call supplying them passes argument validation', good.length === 0, JSON.stringify(good).slice(0, 80));
-    const wrongType = validateJsonSchemaValue(p, { url: 42 });
-    check('a wrong-typed argument is rejected', wrongType.length > 0, JSON.stringify(wrongType).slice(0, 80));
+    check('a call supplying them passes argument validation', validateJsonSchemaValue(p, goodArgs).length === 0,
+      JSON.stringify(validateJsonSchemaValue(p, goodArgs)).slice(0, 120));
+    check(`a wrong-typed ${declared[0]} is rejected`, validateJsonSchemaValue(p, { [declared[0]]: 42 }).length > 0);
+
+    const first = (p.properties ?? {})[declared[0]] ?? {};
+    if (Array.isArray(first.enum)) {
+      const bad = validateJsonSchemaValue(p, { ...goodArgs, [declared[0]]: 'not-a-member-of-this-enum' });
+      check(`a ${declared[0]} outside its enum is rejected`, bad.length > 0, JSON.stringify(bad).slice(0, 80));
+    }
   } else {
     check('no required parameters declared', true, '(all optional by design)');
   }
