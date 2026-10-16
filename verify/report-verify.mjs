@@ -15,11 +15,38 @@
 // pure-shape checks run without a network at all so a sandboxed runner still
 // exercises them.
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { spawnSync } from 'node:child_process';
+import { dirname, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const REPO = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/u, '$1');
-const dshRoot = join(process.env.APPDATA ?? '', 'npm', 'node_modules', '@deepseek-ai', 'dsh');
+// Same rule as schema-verify.mjs: ask npm where its global prefix is rather than
+// assuming %APPDATA%\npm or /usr/local/lib, because installers (nvm, Homebrew,
+// actions/setup-node) relocate it.
+function findDshRoot() {
+  const npm = spawnSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['prefix', '-g'],
+    { encoding: 'utf8', timeout: 60000, windowsHide: true });
+  const prefix = String(npm.stdout ?? '').trim();
+  const candidates = [];
+  if (npm.status === 0 && prefix !== '') candidates.push(join(prefix, 'node_modules', '@deepseek-ai', 'dsh'));
+  if (process.platform === 'win32') candidates.push(join(process.env.APPDATA ?? '', 'npm', 'node_modules', '@deepseek-ai', 'dsh'));
+  else {
+    candidates.push(
+      '/usr/local/lib/node_modules/@deepseek-ai/dsh',
+      '/opt/homebrew/lib/node_modules/@deepseek-ai/dsh',
+      join(process.env.HOME ?? '', '.local', 'lib', 'node_modules', '@deepseek-ai', 'dsh'),
+    );
+  }
+  const found = candidates.find(p => existsSync(join(p, 'package.json')));
+  if (found === undefined) {
+    throw new Error('npm-global @deepseek-ai/dsh not found. Tried:\n  ' + candidates.join('\n  ')
+      + '\nInstall it with: npm install -g @deepseek-ai/dsh');
+  }
+  return found;
+}
+
+const here = dirname(fileURLToPath(import.meta.url));
+const REPO = dirname(here);
+const dshRoot = findDshRoot();
 const toolsEntry = join(dshRoot, 'node_modules', '@deepseek-ai', 'dsh-tools', 'lib', 'index.js');
 if (!existsSync(toolsEntry)) throw new Error(`dsh-tools not found at ${toolsEntry}`);
 

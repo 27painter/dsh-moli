@@ -37,12 +37,16 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20.12'
+          # The plugin itself needs >= 20.12, but DSH's own dependency tree needs
+          # more: on Node 20.12 `npm install -g @deepseek-ai/dsh` warns EBADENGINE
+          # for commander@15 (>= 22.12.0), undici@8 (>= 22.19.0) and others.
+          node-version: '22'
 
       # schema-verify imports the registry's own validator out of the DSH install
       # (`@deepseek-ai/dsh-tools`), because the plain `ctx.tools.register` path is
-      # where two registration failures shipped from. The package is not a
-      # dependency of the plugin -- the plugin has none -- so CI installs it here.
+      # where two registration failures shipped from. It is not a dependency of the
+      # plugin -- the plugin has none -- so CI installs it here. The lookup asks
+      # `npm prefix -g`, since setup-node relocates the global prefix.
       - name: Install DSH (provides the registry validator)
         run: npm install -g @deepseek-ai/dsh
 
@@ -71,7 +75,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20.12'
+          node-version: '22'
 
       - name: install-verify (download routes against a loopback server)
         shell: bash

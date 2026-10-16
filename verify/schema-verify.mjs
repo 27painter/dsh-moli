@@ -14,33 +14,55 @@
 // Both layers must therefore be RAW JSON Schema, because this plugin registers
 // plain definitions instead of going through `defineTool`.
 import { existsSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-// Locate the npm-global @deepseek-ai/dsh package. The layout differs per
-// platform: Windows keeps npm-global under %APPDATA%\npm\node_modules, while
-// POSIX installs it under a node_modules dir that depends on the runtime
-// (system /usr/local or /usr, nvm, or a per-user prefix). Probe the common
-// candidates instead of assuming one, and fail with the tried list rather than
-// an opaque ERR_INVALID_ARG_TYPE.
+/**
+ * Locate the npm-global `@deepseek-ai/dsh` package.
+ *
+ * Ask npm where its global prefix is instead of guessing. A candidate list was
+ * the first attempt and it failed on the first CI run: `actions/setup-node`
+ * relocates the global prefix, so `npm install -g` reported "added 539 packages"
+ * and the lookup still found nothing under `/usr/local/lib` or `%APPDATA%\npm`.
+ * `npm prefix -g` answers for every install shape -- system, nvm, Homebrew,
+ * setup-node, custom -- so the list below is only a fallback for when npm cannot
+ * be run at all.
+ */
 function findDshRoot() {
-  const candidates = process.platform === 'win32'
+  const tried = [];
+  const looksRight = p => existsSync(join(p, 'package.json'));
+
+  const npm = spawnSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['prefix', '-g'],
+    { encoding: 'utf8', timeout: 60000, windowsHide: true });
+  const prefix = String(npm.stdout ?? '').trim();
+  if (npm.status === 0 && prefix !== '') {
+    const candidate = join(prefix, 'node_modules', '@deepseek-ai', 'dsh');
+    tried.push(`${candidate}  (from \`npm prefix -g\`)`);
+    if (looksRight(candidate)) return candidate;
+  } else {
+    tried.push(`\`npm prefix -g\` failed: ${String(npm.error?.message ?? npm.stderr ?? '').trim().slice(0, 120)}`);
+  }
+
+  const fallbacks = process.platform === 'win32'
     ? [join(process.env.APPDATA ?? '', 'npm', 'node_modules', '@deepseek-ai', 'dsh')]
     : [
         '/usr/local/lib/node_modules/@deepseek-ai/dsh',
+        '/opt/homebrew/lib/node_modules/@deepseek-ai/dsh',
         '/usr/lib/node_modules/@deepseek-ai/dsh',
         join(process.env.HOME ?? '', '.local', 'lib', 'node_modules', '@deepseek-ai', 'dsh'),
         join(process.env.HOME ?? '', '.npm-global', 'lib', 'node_modules', '@deepseek-ai', 'dsh'),
         join(process.env.HOME ?? '', 'node_modules', '@deepseek-ai', 'dsh'),
       ];
-  const found = candidates.find(p => existsSync(p));
-  if (found === undefined) {
-    throw new Error(
-      'dsh package not found under npm-global. Tried:\n  ' + candidates.join('\n  ') +
-      '\nInstall it with: npm install -g @deepseek-ai/dsh, then run this verify again.'
-    );
+  for (const p of fallbacks) {
+    tried.push(p);
+    if (looksRight(p)) return p;
   }
-  return found;
+
+  throw new Error(
+    'the npm-global @deepseek-ai/dsh package was not found. Tried:\n  ' + tried.join('\n  ') +
+    '\nInstall it with: npm install -g @deepseek-ai/dsh, then run this verify again.'
+  );
 }
 
 const dshRoot = findDshRoot();
