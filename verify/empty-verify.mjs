@@ -10,7 +10,8 @@
 // compiled stub, so this test does not depend on the network or on any
 // particular site staying client-rendered.
 import { spawnSync } from 'node:child_process';
-import { existsSync, rmSync, statSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readFileSync, rmSync, statSync, unlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -28,10 +29,30 @@ const stubs = {
 };
 
 // ---- build the stubs if they are missing ------------------------------------
+// stdio goes to real files, never to pipes: a child under the DSH file sandbox
+// cannot open inherited pipes, so a default-pipe spawn fails with EPERM and
+// status null. That is the same trap lib/moli.js documents at its head, and an
+// earlier version of this file relied on pipes and could only run unsandboxed.
+function capture(command, argv, timeoutMs) {
+  const outPath = join(tmpdir(), `dsh-moli-capture-${String(process.pid)}-${String(Math.trunc(Math.random() * 1e6))}.txt`);
+  let fd;
+  try {
+    fd = openSync(outPath, 'w');
+    const r = spawnSync(command, argv, { stdio: ['ignore', fd, 'ignore'], timeout: timeoutMs });
+    closeSync(fd);
+    fd = undefined;
+    const text = existsSync(outPath) ? readFileSync(outPath, 'utf8') : '';
+    return { status: r.status, error: r.error, stdout: text };
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+    if (existsSync(outPath)) unlinkSync(outPath);
+  }
+}
+
 function build(source, output) {
   if (existsSync(output)) return true;
   const gcc = isWindows ? 'gcc' : 'cc';
-  const r = spawnSync(gcc, ['-O1', '-o', output, join(here, source)], { stdio: 'ignore', timeout: 120000 });
+  const r = capture(gcc, ['-O1', '-o', output, join(here, source)], 120000);
   return r.status === 0 && existsSync(output);
 }
 
@@ -60,7 +81,7 @@ const fetchTool = registered.get('moli_fetch');
 
 // ---- 1. the engine itself: exit 0, no output --------------------------------
 console.log('1. engine behaviour');
-const raw = spawnSync(stubs.noop, ['fetch', 'https://example.invalid/', '-d', 'markdown'], { encoding: 'buffer', timeout: 30000 });
+const raw = capture(stubs.noop, ['fetch', 'https://example.invalid/', '-d', 'markdown'], 30000);
 check('stub exits 0', raw.status === 0, `status=${String(raw.status)}`);
 check('stub prints nothing', raw.stdout.length === 0, `stdout=${String(raw.stdout.length)} bytes`);
 

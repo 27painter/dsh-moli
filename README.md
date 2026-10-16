@@ -312,6 +312,10 @@ Override any field under the plugin's `config` entry in the profile patch layer.
         insecureTls: true                                        # see the TLS notes below
 ```
 
+The plugin-level `proxy` above is the default; `moli_fetch` also takes a `proxy` argument, so a single
+call can route through a different proxy without changing the profile. A loopback URL always bypasses
+whichever proxy is in effect.
+
 Without `exePath`, the plugin probes `exePath` → `MOLI_BIN` → `%LOCALAPPDATA%\Moli\bin\moli.exe` →
 `%USERPROFILE%\.local\bin\moli.exe`, then scans inside `%LOCALAPPDATA%\Moli` for a `moli.exe`, so an
 installation under a versioned subdirectory is still found.
@@ -367,6 +371,17 @@ Four suites live in [`verify/`](verify/), and all are runnable against a working
 - `win-verify.mjs` (Windows hosts) runs the same pure assertions, then executes the `DefaultWebProxy`
   prelude in a real `powershell.exe` and inspects the proxy object and credentials it set, exercises
   the Windows download routes, and runs `installMoli` end to end.
+- `empty-verify.mjs` asserts, against three compiled stub engines, that a fetch which exits 0 with no
+  output is a successful empty result rather than an error, that a non-zero exit still fails, and that
+  a complaint on stderr with no stdout is not mistaken for an empty page.
+- `report-verify.mjs` guards the findings from a usage report: `eval` documents that pairing it with
+  `dump` discards its value, an expression that throws is classified as such instead of being blamed
+  on the installation, truncation keeps the tail as well as the head, `proxy` is a per-call parameter,
+  and `moli_probe` states which process its `httpsOk` describes.
+
+`.github/workflows/verify.yml` runs the first two on Linux, Windows and macOS (they need no engine and
+no network) and attempts the engine-dependent suites on Linux and Windows, reporting a missing engine
+as a skip rather than a failure.
 
 Beyond those, `lib/moli.js` and the tool layer were exercised end to end against Moli 1.1.16 on
 Windows: registration, probe, Markdown and JSON dumps, `eval` (including a tight-timeout regression

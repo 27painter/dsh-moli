@@ -1,0 +1,111 @@
+name: verify
+
+# Every pull request so far was verified by hand. The suites exist but nothing ran
+# them, which is how a Windows-only default and a head-only truncation both
+# shipped. These two tiers fix that:
+#
+#   core    - schema-verify and empty-verify need no engine and no network. They
+#             cover the two failure classes that actually shipped (an output
+#             schema the registry rejects, and a successful-but-empty fetch
+#             reported as an error), so they run everywhere and must pass.
+#   engine  - install-verify, win-verify and linux-verify drive real moli. A
+#             runner has none installed, so these are attempted and only their
+#             actual failures fail the job; "engine not found" is reported as a
+#             skip instead of a red build that hides real breakage.
+#
+# Add the CI-only dependencies here as they appear.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  core:
+    name: core (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.12'
+
+      # schema-verify imports the registry's own validator out of the DSH install
+      # (`@deepseek-ai/dsh-tools`), because the plain `ctx.tools.register` path is
+      # where two registration failures shipped from. The package is not a
+      # dependency of the plugin -- the plugin has none -- so CI installs it here.
+      - name: Install DSH (provides the registry validator)
+        run: npm install -g @deepseek-ai/dsh
+
+      # The c stub engines are compiled by the test itself; fail early with a
+      # clear message if the runner has no compiler.
+      - name: Compiler present
+        shell: bash
+        run: cc --version || gcc --version
+
+      - name: schema-verify (registry's own validator)
+        run: node verify/schema-verify.mjs
+
+      - name: empty-verify (successful fetch with no output)
+        run: node verify/empty-verify.mjs
+
+  engine:
+    name: engine (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    continue-on-error: false
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.12'
+
+      - name: install-verify (download routes against a loopback server)
+        shell: bash
+        run: |
+          set -o pipefail
+          out=$(node verify/install-verify.mjs 2>&1) && { echo "$out"; exit 0; }
+          echo "$out"
+          if echo "$out" | grep -qiE 'moli .*not found|was not found|no working moli|ENOENT'; then
+            echo "::notice::no moli engine on this runner; install-verify skipped"
+            exit 0
+          fi
+          exit 1
+
+      - name: win-verify (Windows install paths and proxy prelude)
+        shell: bash
+        run: |
+          set -o pipefail
+          out=$(node verify/win-verify.mjs 2>&1) && { echo "$out"; exit 0; }
+          echo "$out"
+          if echo "$out" | grep -qiE 'moli .*not found|was not found|no working moli|ENOENT'; then
+            echo "::notice::no moli engine on this runner; win-verify skipped"
+            exit 0
+          fi
+          exit 1
+
+      - name: linux-verify (POSIX engine discovery and proxy env)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -o pipefail
+          out=$(node verify/linux-verify.mjs 2>&1) && { echo "$out"; exit 0; }
+          echo "$out"
+          if echo "$out" | grep -qiE 'moli .*not found|was not found|no working moli|ENOENT'; then
+            echo "::notice::no moli engine on this runner; linux-verify skipped"
+            exit 0
+          fi
+          exit 1

@@ -286,6 +286,9 @@ cookie 驱动的查询参数。那次实测同时覆盖了代理下载路由与�
         insecureTls: true                                        # 见下方 TLS 说明
 ```
 
+上面配置里的 `proxy` 是默认值；`moli_fetch` 也能接收 `proxy` 参数，因此单次调用可以走另一个代理而不必改
+profile。无论生效的是哪个代理，loopback 地址一律绕过它。
+
 未设置 `exePath` 时探测顺序：`exePath` → 环境变量 `MOLI_BIN` → `%LOCALAPPDATA%\Moli\bin\moli.exe`
 → `%USERPROFILE%\.local\bin\moli.exe`，随后还会在 `%LOCALAPPDATA%\Moli` 内递归查找 `moli.exe`，
 所以装在带版本号的子目录里也能找到。
@@ -327,6 +330,14 @@ cookie 驱动的查询参数。那次实测同时覆盖了代理下载路由与�
   这正是异步路径的验收标准。
 - `win-verify.mjs`（Windows 主机）跑同样的纯函数断言，然后在真实 `powershell.exe` 里执行 `DefaultWebProxy`
   prelude 并检查它设置的代理对象与凭据，练习 Windows 下载路由，并端到端跑 `installMoli`。
+- `empty-verify.mjs` 用三个编译好的桩引擎断言：退出码 0 且无输出属于"成功但内容为空"，而不是错误；非零退出
+  仍然失败；stderr 有抱怨而 stdout 为空不会被误当成空页面。
+- `report-verify.mjs` 守住一份使用体验报告里的发现：`eval` 与 `dump` 同用会丢弃表达式值（已在参数描述里
+  写明）、表达式抛异常时被正确归类而不是甩锅给"安装有问题"、截断同时保留头尾、`proxy` 是可按调用传入的参数、
+  以及 `moli_probe` 会说明它的 `httpsOk` 描述的是哪个进程。
+
+`.github/workflows/verify.yml` 在 Linux、Windows、macOS 上跑前两个（无需引擎、无需网络），在 Linux 与 Windows
+上尝试依赖引擎的几套；若 runner 上没有引擎，则报告为跳过而不是失败。
 
 此外，`lib/moli.js` 与工具层在 Windows 上对 Moli 1.1.16 做了端到端验证：注册、probe、Markdown 与 JSON
 dump、`eval`（含针对 `-t` 参数位置的紧超时回归防护）、PNG 与 PDF 产物签名、截断、全部拒绝路径（二元 dump

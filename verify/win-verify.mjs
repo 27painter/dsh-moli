@@ -11,7 +11,7 @@
 //
 // Exit code 0 = all checks passed, 1 = any failed.
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
+import { closeSync, existsSync, mkdtempSync, openSync, readFileSync, rmSync, statSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -62,18 +62,35 @@ check('garbage proxy yields empty env', Object.keys(proxyEnv('bad')).length === 
 
 if (isWin) {
   console.log('\n3. PowerShell prelude executes and sets the proxy object (real powershell.exe)');
+  // Capture through real files: a child under the DSH file sandbox cannot open
+  // inherited pipes, so a default-pipe spawn fails with EPERM and status null.
+  const capture = (argv, timeoutMs) => {
+    const outPath = join(tmpdir(), `dsh-moli-win-${String(process.pid)}-${String(Math.trunc(Math.random() * 1e6))}.txt`);
+    let fd;
+    try {
+      fd = openSync(outPath, 'w');
+      const r = spawnSync('powershell.exe', argv, { stdio: ['ignore', fd, 'ignore'], timeout: timeoutMs });
+      closeSync(fd);
+      fd = undefined;
+      return { status: r.status, error: r.error, stdout: existsSync(outPath) ? readFileSync(outPath, 'utf8').trim() : '' };
+    } finally {
+      if (fd !== undefined) closeSync(fd);
+      if (existsSync(outPath)) unlinkSync(outPath);
+    }
+  };
+
   const prelude = powershellProxyPrelude('http://127.0.0.1:9');
-  const probe = spawnSync('powershell.exe', [
+  const probe = capture([
     '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command',
     `${prelude} if ($null -eq $__dshMoliProxy) { exit 1 }; $addr = [string]$__dshMoliProxy.Address; if ($addr -ne 'http://127.0.0.1:9/') { Write-Host $addr; exit 2 }; exit 0`,
-  ], { timeout: 30000, encoding: 'utf8' });
-  check('prelude parses and address matches', probe.status === 0, `exit ${probe.status} ${probe.stdout ?? ''}`);
+  ], 30000);
+  check('prelude parses and address matches', probe.status === 0, `exit ${String(probe.status)} ${probe.stdout}`);
 
-  const authedProbe = spawnSync('powershell.exe', [
+  const authedProbe = capture([
     '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command',
     `${powershellProxyPrelude('http://alice:s3cr3t@127.0.0.1:9')} if ($null -eq $__dshMoliProxy.Credentials) { exit 3 }; $cred = $__dshMoliProxy.Credentials.GetCredential('http://127.0.0.1:9', 'Basic'); if ($null -eq $cred) { exit 4 }; if ($cred.UserName -ne 'alice') { Write-Host $cred.UserName; exit 5 }; exit 0`,
-  ], { timeout: 30000, encoding: 'utf8' });
-  check('authed prelude sets usable credentials', authedProbe.status === 0, `exit ${authedProbe.status} ${authedProbe.stdout ?? ''}`);
+  ], 30000);
+  check('authed prelude sets usable credentials', authedProbe.status === 0, `exit ${String(authedProbe.status)} ${authedProbe.stdout}`);
 
   console.log('\n4. downloadInstaller Windows routes (loopback server)');
   const dir = mkdtempSync(join(tmpdir(), 'dsh-moli-win-'));

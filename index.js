@@ -65,7 +65,7 @@ const FETCH_PARAMETERS = {
     },
     eval: {
       type: 'string',
-      description: 'JavaScript expression evaluated once the page is ready; its value is returned as text or JSON instead of the page.',
+      description: 'JavaScript expression evaluated once the page is ready; its value is returned as text or JSON instead of the page. Combining it with `dump` does NOT return both: the engine discards the expression value and dumps the resulting page state instead (its own documented semantics). Use `eval` alone to read a value, or `dump` alone to read the page.',
     },
     wait: {
       type: 'string',
@@ -85,6 +85,10 @@ const FETCH_PARAMETERS = {
     resources: { type: 'boolean', description: 'Also fetch images, fonts, audio, video, and text tracks.' },
     withFrames: { type: 'boolean', description: 'Include subframes in the output.' },
     insecureTls: { type: 'boolean', description: 'Skip TLS host verification. Use only for a known-broken local endpoint.' },
+    proxy: {
+      type: 'string',
+      description: 'Forward proxy for this call, e.g. "http://127.0.0.1:7890". Overrides the plugin configuration for one call; loopback URLs always bypass it.',
+    },
     profileDir: { type: 'string', description: 'Moli profile directory carrying imported cookies or storage.' },
     cookieFile: { type: 'string', description: 'Netscape/curl cookie-jar file to send.' },
   },
@@ -111,6 +115,8 @@ const FETCH_OUTPUT_SCHEMA = {
     chars: { type: 'integer' },
     bytes: { type: 'integer' },
     empty: { type: 'boolean' },
+    omitted: { type: 'integer' },
+    evalFailed: { type: 'boolean' },
     truncated: { type: 'boolean' },
     error: { type: 'string' },
     hint: { type: 'string' },
@@ -132,6 +138,7 @@ const PROBE_OUTPUT_SCHEMA = {
     exe: { type: 'string' },
     version: { type: 'string' },
     httpsOk: { type: 'boolean' },
+    httpsOkScope: { type: 'string' },
     sandboxTlsBlock: { type: 'boolean' },
     revocationBlock: { type: 'boolean' },
     detail: { type: 'string' },
@@ -265,11 +272,13 @@ export function apply(ctx, config) {
           manualInstall: MANUAL_INSTALL,
         };
       }
+      // A per-call proxy wins over the plugin configuration, so one host behind a
+      // different proxy does not require a reconfiguration.
       return runFetch({
         exe,
         args: { ...args, timeoutMs: args.timeoutMs ?? defaultTimeoutMs },
         maxChars,
-        proxy,
+        proxy: typeof args.proxy === 'string' && args.proxy !== '' ? args.proxy : proxy,
         insecureTls,
       });
     },
@@ -335,6 +344,10 @@ export function apply(ctx, config) {
         exe: result.exe,
         version: result.version,
         httpsOk: result.httpsOk,
+        // Says which process the HTTPS result describes. Under the file sandbox a
+        // restricted shell cannot reach the network while this path can, so the
+        // caller should not read httpsOk as "this machine has internet".
+        httpsOkScope: result.httpsOkScope,
         sandboxTlsBlock: result.sandboxTlsBlock,
         revocationBlock: result.revocationBlock,
         detail: result.detail,
