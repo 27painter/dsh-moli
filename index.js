@@ -440,14 +440,28 @@ export function apply(ctx, config) {
   const NS = 'dsh-moli';
   let engineBusy = false;
   const currentConfig = () => (typeof config.get === 'function' ? config.get() : (config ?? {}));
+  // Write settings outside the current HMR transaction. `settings.update`
+  // routes through dsh-hmr's runExclusive, which rejects when it is called
+  // from inside an active transaction — the settings/document-updated event
+  // handler runs in one, so a direct update throws
+  // "HMR transactions cannot be nested" and the write-back is silently lost
+  // (the form then stays on "working…" forever). setImmediate defers the
+  // update until the event transaction has exited.
+  const writeSettings = (settings, patch) =>
+    new Promise((resolve, reject) => {
+      setImmediate(() => {
+        settings.update(NS, patch).then(resolve, reject);
+      });
+    });
   const syncEngineState = async (settings, current) => {
     const exe = findMoli(current.exePath);
     const state = exe === undefined ? 'missing' : 'installed';
     const version = exe === undefined ? '' : (moliVersion(exe) ?? '');
     if (current.engineState === state && current.engineVersion === version) return;
     try {
-      await settings.update(NS, { engineState: state, engineVersion: version });
+      await writeSettings(settings, { engineState: state, engineVersion: version });
     } catch (error) {
+      console.error(`[dsh-moli] engine-state sync failed: ${String(error?.message ?? error)}`);
       ctx.logger?.warn?.('dsh-moli: engine-state sync failed', String(error?.message ?? error));
     }
   };
@@ -464,7 +478,7 @@ export function apply(ctx, config) {
           candidates: moliCandidates(current.exePath),
         });
         cachedExe = outcome.ok === true ? (outcome.exe ?? cachedExe) : cachedExe;
-        await settings.update(NS, {
+        await writeSettings(settings, {
           engineAction: 'none',
           engineState: outcome.ok === true ? 'installed' : `install failed: ${String(outcome.error ?? 'unknown error').slice(0, 200)}`,
           engineVersion: outcome.ok === true ? String(outcome.version ?? '') : '',
@@ -472,43 +486,95 @@ export function apply(ctx, config) {
       } else if (action === 'uninstall') {
         const removed = uninstallMoli(current.exePath);
         cachedExe = undefined;
-        await settings.update(NS, {
+        await writeSettings(settings, {
           engineAction: 'none',
           engineState: removed === undefined ? 'uninstall failed: nothing to remove' : 'missing',
           engineVersion: '',
         });
       }
     } catch (error) {
+      // console (not ctx.logger) so the failure reaches the service journal
+      console.error(`[dsh-moli] engine action failed: ${String(error?.message ?? error)}`);
+      ctx.logger?.error?.('dsh-moli: engine action failed', String(error?.message ?? error));
       try {
-        await settings.update(NS, {
+        await writeSettings(settings, {
           engineAction: 'none',
           engineState: `action failed: ${String(error?.message ?? error).slice(0, 200)}`,
         });
-      } catch {
-        // The settings service may be gone; nothing to do.
+      } catch (error2) {
+        console.error(`[dsh-moli] engine action failure report could not be written back: ${String(error2?.message ?? error2)}`);
+        ctx.logger?.error?.('dsh-moli: engine action failure report could not be written back', String(error2?.message ?? error2));
       }
     } finally {
       engineBusy = false;
+    }
+  };
+  // Dispatch an engineAction if one is pending, otherwise sync state. Shared by
+  // the settings update handler and the boot-time initial sync, so an action
+  // whose `settings/document-updated` event was lost (a crash between the
+  // form's write and the handler) is still picked up on the next boot instead
+  // of leaving the form stuck on "processing".
+  // The event fires inside a dsh-hmr transaction. That transaction propagates
+  // through AsyncLocalStorage into anything the handler spawns — including
+  // setTimeout/setImmediate callbacks — so a deferred settings.update still
+  // nests and is rejected ("HMR transactions cannot be nested"). dsh-hmr
+  // itself escapes its own transaction with `executing.exit(...)` (watchConfig
+  // does this); running the dispatch through the same exit clears the ALS
+  // store so the write-back opens its own outermost transaction. The poller
+  // below stays as a defensive fallback (exit missing, or an event lost
+  // between the form's write and the handler).
+  const dispatchOutsideTransaction = (settings) => {
+    const hmr = ctx.get?.('hmr');
+    const run = () => {
+      const current = currentConfig();
+      const action = current.engineAction;
+      if (action === 'install' || action === 'uninstall') void runEngineAction(settings, current, action);
+      else void syncEngineState(settings, current);
+    };
+    if (hmr && typeof hmr.executing?.exit === 'function') {
+      hmr.executing.exit(run);
+    } else {
+      run();
+    }
+  };
+  // Actions are driven by an independent poller as a fallback, and by the
+  // transaction-escaped dispatch on the event path. A setInterval callback
+  // runs in the timer phase, outside any transaction, so the action and its
+  // write-back are safe there too.
+  let pollTimer = null;
+  let pendingCheck = false;
+  const pollCheck = () => {
+    const settings = ctx.get('settings');
+    if (!settings) return;
+    const current = currentConfig();
+    const action = current.engineAction;
+    if (action === 'install' || action === 'uninstall') {
+      void runEngineAction(settings, current, action);
+    } else {
+      void syncEngineState(settings, current);
     }
   };
   ctx.on?.('settings/document-updated', (id) => {
     if (id !== NS) return;
     const settings = ctx.get('settings');
     if (!settings) return;
-    const current = currentConfig();
-    const action = current.engineAction;
-    if (action === 'install' || action === 'uninstall') void runEngineAction(settings, current, action);
-    else void syncEngineState(settings, current);
+    pendingCheck = true;
+    dispatchOutsideTransaction(settings);
   });
+  pollTimer = setInterval(() => {
+    if (pendingCheck) {
+      pendingCheck = false;
+      pollCheck();
+    }
+  }, 500);
   // Initial state once settings is live. `ctx.get('settings')` may be null in a
-  // boot-time effect (the service mounts later), so retry briefly; the
-  // `settings/document-updated` handler also covers the case where the form's
-  // first describe drives the sync.
+  // boot-time effect (the service mounts later), so retry briefly; the poller
+  // also picks up any pending engineAction written before the service settled.
   let syncAttempts = 0;
   const tryInitialSync = () => {
     const settings = ctx.get('settings');
     if (!settings) return false;
-    void syncEngineState(settings, currentConfig());
+    pollCheck();
     return true;
   };
   if (!tryInitialSync()) {

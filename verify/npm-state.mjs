@@ -3,14 +3,14 @@ import { spawnSync } from 'node:child_process';
 import { openSync, closeSync, readFileSync, existsSync, unlinkSync, mkdtempSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 // This script runs at publish time on the server, which is POSIX, so it cannot
 // hard-code LOCALAPPDATA (undefined there — path.join would throw). Resolve the
 // engine through the plugin's own cross-platform findMoli and fall back to the
 // platform's home layout, like lib/moli.js itself does.
 const REPO = fileURLToPath(new URL('..', import.meta.url));
-const { findMoli } = await import(join(REPO, 'lib', 'moli.js'));
+const { findMoli } = await import(pathToFileURL(join(REPO, 'lib', 'moli.js')).href);
 const exe = findMoli(undefined)
   ?? (process.platform === 'win32'
     ? join(process.env.LOCALAPPDATA ?? '', 'Moli', 'bin', 'moli.exe')

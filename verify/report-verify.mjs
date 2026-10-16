@@ -77,6 +77,13 @@ if (!existsSync(toolsEntry)) throw new Error(`dsh-tools not found at ${toolsEntr
 
 const { assertSupportedJsonSchema, validateJsonSchemaValue } = await import(pathToFileURL(toolsEntry).href);
 
+// The network groups (4-6) and the probe group (7) drive a real engine: without
+// one every call fails with "moli was not found". Probe for the engine up front
+// (same check as http-verify) and skip those groups cleanly when it is absent,
+// so the suite still passes on a host where the engine was uninstalled.
+const { findMoli } = await import(pathToFileURL(join(REPO, 'lib', 'moli.js')).href);
+const engineExe = findMoli(undefined);
+
 const registered = new Map();
 const { apply } = await import(pathToFileURL(join(REPO, 'index.js')).href);
 apply({ tools: { register: d => registered.set(d.name, d) }, logger: { info() {}, warn() {} }, on() {}, get: () => null },
@@ -118,9 +125,14 @@ console.log('\n3. eval documents the dump interaction (offline)');
 check('eval description mentions discarding the value', /discard/u.test(props.eval.description));
 
 // ---- network-dependent behaviour -------------------------------------------
-// Groups 4-6 need the open internet (example.com, bbs.nga.cn). Like http-verify,
-// probe a stable page first and skip the network groups when the network is
-// absent, so an offline runner reports a clean skip instead of false failures.
+// Groups 4-6 need the open internet (example.com, bbs.nga.cn) and group 7 needs
+// a real engine. Like http-verify, probe up front and skip cleanly when the
+// engine or the network is absent, so an offline or engine-less runner reports
+// a clean skip instead of false failures.
+if (engineExe === undefined) {
+  skipped += 10;
+  console.log('  SKIP: no moli engine; groups 4-7 skipped');
+} else {
 console.log('\n4-6. network-dependent checks');
 const probe = await fetchTool.execute({ url: 'https://example.com/', dump: 'markdown', timeoutMs: 45000 }, {});
 if (probe.ok !== true && /Unable to resolve|Failed to connect|timed out|unreachable|ENOTFOUND|EAI_AGAIN/iu.test(String(probe.error))) {
@@ -161,7 +173,7 @@ if (short.ok === true) {
 } else {
   check('short page fetched', false, JSON.stringify(String(short.error ?? '').slice(0, 70)));
 }
-}
+} // end network-available else (groups 4-6)
 
 console.log('\n7. probe states what httpsOk covers');
 const probed = await probeTool.execute({ action: 'inspect' }, {});
@@ -169,6 +181,7 @@ check('engine installed', probed.installed === true);
 check('httpsOk reported', typeof probed.httpsOk === 'boolean');
 check('httpsOkScope names the host process', /DSH host process/u.test(String(probed.httpsOkScope)),
   JSON.stringify(String(probed.httpsOkScope).slice(0, 70)));
+} // end engine-available else (groups 4-7)
 
 console.log(`\nresult: ${pass} passed, ${fail} failed${skipped ? `, ${skipped} skipped` : ''}`);
 process.exit(fail === 0 ? 0 : 1);
