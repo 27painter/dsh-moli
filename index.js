@@ -1,19 +1,27 @@
 /** Host half of dsh-moli: expose the local `moli` headless browser as callable tools. */
-import { MANUAL_INSTALL, installMoli } from './lib/install.js';
-import { findMoli, moliCandidates, probe, runFetch } from './lib/moli.js';
+import { MANUAL_INSTALL, installMoli, uninstallMoli } from './lib/install.js';
+import { findMoli, moliCandidates, moliVersion, probe, runFetch } from './lib/moli.js';
 
 export const name = 'dsh-moli';
 export const inject = ['tools'];
 
 /**
- * This plugin deliberately imports nothing but `node:` builtins and its own
- * files. A profile plugin is loaded from its real path on disk (a `link:`
- * dependency stays a symlink target), so a bare specifier such as
- * `@deepseek-ai/schemastery` would resolve against the plugin directory
- * instead of the profile's `node_modules` and fail to load. The registry
- * validates parameters and results itself, so `defineTool` and a Schema-based
- * config are not needed; configuration is read defensively from the patch layer.
+ * `@deepseek-ai/schemastery` powers the live Config schema and therefore the
+ * settings namespace. A profile plugin is loaded from its real path on disk (a
+ * `link:` dependency stays a symlink target), so a bare specifier must resolve
+ * against the plugin's own `node_modules` chain — which does not exist when the
+ * plugin is installed as a `link:`/junction (the README's first install route).
+ * The import is therefore optional: without schemastery the settings form does
+ * not appear and the plugin degrades to plain patch-layer configuration, while
+ * `moli_fetch` / `moli_probe` keep registering — those are the plugin's reason
+ * to exist, and losing them would be worse than losing the form.
  */
+let z;
+try {
+  z = (await import('@deepseek-ai/schemastery')).default;
+} catch {
+  z = undefined;
+}
 
 /** Deployment configuration defaults; override via the plugin's `config` entry. */
 const DEFAULTS = {
@@ -26,6 +34,35 @@ const DEFAULTS = {
   // certificate checks on a network that can reach the responders.
   insecureTls: true,
 };
+
+/**
+ * Live Config schema. Declaring it (and exporting it) makes DSH register the
+ * `dsh-moli` settings namespace, which the browser half's `plugins.bundle.config`
+ * form edits. `.volatile()` marks the whole object live so the namespace appears
+ * in the settings describe mirror and the form's writes are applied via the
+ * ConfigEditor / volatile HMR path.
+ *
+ * `undefined` when `@deepseek-ai/schemastery` cannot be resolved (a `link:`
+ * install) — then no settings namespace is registered and the engine lifecycle
+ * is skipped, but the tools still register.
+ */
+export const Config = z
+  ? z.object({
+    defaultTimeoutMs: z.number().default(DEFAULTS.defaultTimeoutMs),
+    maxChars: z.number().default(DEFAULTS.maxChars),
+    insecureTls: z.boolean().default(DEFAULTS.insecureTls),
+    proxy: z.string().default(''),
+    exePath: z.string().default(''),
+    // Engine lifecycle, driven by the settings form. The form writes an action
+    // (`install` / `uninstall`) and the Host executes it asynchronously, then
+    // reports the outcome back through `engineState` / `engineVersion` and resets
+    // `engineAction` to `none`. `engineState` is `installed`, `missing`, or a
+    // short error text.
+    engineAction: z.union([z.const('none'), z.const('install'), z.const('uninstall')]).default('none'),
+    engineState: z.string().default('unknown'),
+    engineVersion: z.string().default(''),
+  }).volatile()
+  : undefined;
 
 /**
  * Parameter schema of `moli_fetch`.
@@ -265,7 +302,10 @@ function renderProbe(_args, value) {
  * @param config - deployment configuration for paths, timeout, and output size.
  */
 export function apply(ctx, config) {
-  const options = config ?? {};
+  // The Config schema is declared volatile, so DSH hands it as a live reference
+  // whose `.get()` reads the current values; a deployment that mounts an older
+  // loader without volatile wiring passes a plain object instead. Read either.
+  const options = typeof config?.get === 'function' ? config.get() : (config ?? {});
   // Mutable: a successful install resolves a path this process can use at once,
   // without waiting for a restart to re-run discovery.
   let cachedExe = findMoli(options.exePath);
@@ -383,6 +423,100 @@ export function apply(ctx, config) {
       };
     },
   });
+
+  // ── engine lifecycle via the settings form ─────────────────────────────
+  // The browser half's `plugins.bundle.config` form drives install/uninstall
+  // through the `engineAction` field and reads the outcome from
+  // `engineState`/`engineVersion`. State is written back only when it changes,
+  // and a finished action always resets `engineAction` to `none`, so the
+  // resulting `settings/document-updated` re-entry lands in the plain sync
+  // branch instead of looping the action.
+  //
+  // Everything here depends on the settings namespace, which exists only when
+  // schemastery resolved (see the `Config` export): without it there is no form
+  // to drive the lifecycle, so the whole block is skipped and the plugin is
+  // pure tool registration.
+  if (Config) {
+  const NS = 'dsh-moli';
+  let engineBusy = false;
+  const currentConfig = () => (typeof config.get === 'function' ? config.get() : (config ?? {}));
+  const syncEngineState = async (settings, current) => {
+    const exe = findMoli(current.exePath);
+    const state = exe === undefined ? 'missing' : 'installed';
+    const version = exe === undefined ? '' : (moliVersion(exe) ?? '');
+    if (current.engineState === state && current.engineVersion === version) return;
+    try {
+      await settings.update(NS, { engineState: state, engineVersion: version });
+    } catch (error) {
+      ctx.logger?.warn?.('dsh-moli: engine-state sync failed', String(error?.message ?? error));
+    }
+  };
+  const runEngineAction = async (settings, current, action) => {
+    if (engineBusy) return;
+    engineBusy = true;
+    try {
+      if (action === 'install') {
+        const outcome = await installMoli({
+          exePath: current.exePath,
+          timeoutMs: 180000,
+          proxy: current.proxy,
+          locate: findMoli,
+          candidates: moliCandidates(current.exePath),
+        });
+        cachedExe = outcome.ok === true ? (outcome.exe ?? cachedExe) : cachedExe;
+        await settings.update(NS, {
+          engineAction: 'none',
+          engineState: outcome.ok === true ? 'installed' : `install failed: ${String(outcome.error ?? 'unknown error').slice(0, 200)}`,
+          engineVersion: outcome.ok === true ? String(outcome.version ?? '') : '',
+        });
+      } else if (action === 'uninstall') {
+        const removed = uninstallMoli(current.exePath);
+        cachedExe = undefined;
+        await settings.update(NS, {
+          engineAction: 'none',
+          engineState: removed === undefined ? 'uninstall failed: nothing to remove' : 'missing',
+          engineVersion: '',
+        });
+      }
+    } catch (error) {
+      try {
+        await settings.update(NS, {
+          engineAction: 'none',
+          engineState: `action failed: ${String(error?.message ?? error).slice(0, 200)}`,
+        });
+      } catch {
+        // The settings service may be gone; nothing to do.
+      }
+    } finally {
+      engineBusy = false;
+    }
+  };
+  ctx.on?.('settings/document-updated', (id) => {
+    if (id !== NS) return;
+    const settings = ctx.get('settings');
+    if (!settings) return;
+    const current = currentConfig();
+    const action = current.engineAction;
+    if (action === 'install' || action === 'uninstall') void runEngineAction(settings, current, action);
+    else void syncEngineState(settings, current);
+  });
+  // Initial state once settings is live. `ctx.get('settings')` may be null in a
+  // boot-time effect (the service mounts later), so retry briefly; the
+  // `settings/document-updated` handler also covers the case where the form's
+  // first describe drives the sync.
+  let syncAttempts = 0;
+  const tryInitialSync = () => {
+    const settings = ctx.get('settings');
+    if (!settings) return false;
+    void syncEngineState(settings, currentConfig());
+    return true;
+  };
+  if (!tryInitialSync()) {
+    const timer = setInterval(() => {
+      if (tryInitialSync() || ++syncAttempts >= 40) clearInterval(timer);
+    }, 250);
+  }
+  }
 
   ctx.logger?.info?.(`dsh-moli: registered moli_fetch and moli_probe (${cachedExe ?? 'moli missing'})`);
 }

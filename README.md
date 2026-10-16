@@ -311,10 +311,13 @@ capabilities always visible to the model.
 2. **Binary output is copied byte for byte.** PowerShell's `>` operator re-encodes a native
    program's output as UTF-16, inserting a `00` after every byte, which corrupts a screenshot.
    Bytes here are written verbatim, so the PNG signature stays `89504e470d0a1a0a`.
-3. **No external dependencies.** A profile plugin is loaded from its real path on disk (a `link:`
+3. **One optional external dependency.** A profile plugin is loaded from its real path on disk (a `link:`
    dependency stays a symlink target), so a bare specifier such as `@deepseek-ai/schemastery`
-   resolves against the plugin directory instead of the profile's `node_modules` and the plugin
-   fails to load. This plugin imports only `node:` builtins and its own files.
+   resolves against the plugin directory instead of the profile's `node_modules`. The import is
+   therefore guarded: without schemastery (a `link:` install) the settings form does not appear and
+   the plugin degrades to plain patch-layer configuration, while `moli_fetch` and `moli_probe` keep
+   registering. With it (a normal npm install, which brings the dependency along) the settings page
+   is available.
 
 ## Platform support
 
@@ -358,6 +361,8 @@ exercised the proxy download route as well as the engine paths.
 ## Configuration
 
 Override any field under the plugin's `config` entry in the profile patch layer. All are optional.
+The same fields are also editable from the **Moli 安装与抓取** settings section on the plugin's page in
+the Plugins manager (a `plugins.bundle.config` form registered by the browser half).
 
 ```yaml
 - insert:
@@ -378,6 +383,22 @@ whichever proxy is in effect.
 Without `exePath`, the plugin probes `exePath` → `MOLI_BIN` → `%LOCALAPPDATA%\Moli\bin\moli.exe` →
 `%USERPROFILE%\.local\bin\moli.exe`, then scans inside `%LOCALAPPDATA%\Moli` for a `moli.exe`, so an
 installation under a versioned subdirectory is still found.
+
+### Engine lifecycle from the settings page
+
+The settings section also carries an **engine** row that detects the installed engine and lets you
+install or uninstall it without touching the profile:
+
+- **state** — `engineState` is `installed` (with `engineVersion`), `missing`, or a short error text.
+- **install** — the form writes `engineAction: "install"`; the host downloads and runs the official
+  installer asynchronously, then reports the outcome back through `engineState` / `engineVersion`.
+- **uninstall** — `engineAction: "uninstall"` removes the engine. On Windows only the installer-owned
+  `%LOCALAPPDATA%\Moli` tree is deleted; without one, nothing is touched. On POSIX the located binary
+  is removed and the now-empty install directories are pruned.
+
+These three fields (`engineAction`, `engineState`, `engineVersion`) are part of the live Config schema;
+`engineAction` is a `none`/`install`/`uninstall` union. They are meant to be driven by the settings
+form, so prefer editing the four fields above for routine configuration.
 
 ## Known limitations
 
@@ -416,8 +437,14 @@ installation under a versioned subdirectory is still found.
 
 ## Verification
 
-Four suites live in [`verify/`](verify/), and all are runnable against a working tree:
+Eight suites live in [`verify/`](verify/), and all are runnable against a working tree:
 
+- `config-verify.mjs` checks the settings surface and engine lifecycle added by the plugin's browser
+  half: the volatile `Config` schema (every declared field, `engineAction` as a `none`/`install`/
+  `uninstall` union), `apply` reading both a plain config and a volatile `.get()` reference, the
+  `settings/document-updated` wiring, `uninstallMoli` (platform-aware: POSIX removes the located
+  binary, Windows removes only the installer-owned `%LOCALAPPDATA%\Moli` tree), and the client.js
+  shape (`plugins.bundle.config` registration, zh/en dictionaries, raw `true`/`false` select labels).
 - `schema-verify.mjs` checks the tool definitions with the registry's own validator, including
   controls that assert the two invalid schema shapes still fail.
 - `install-verify.mjs` drives the install pipeline against a loopback HTTP server: route ordering,
@@ -458,6 +485,12 @@ fetches a specific forum thread, so it needs the open internet — and on a host
 through a proxy, that proxy too. Useful where a network is available, but a suite that goes red
 because a website changed is worse than no suite, so it stays a local check. If you run it and see
 failures in sections 4–6 while sections 1–3 pass, suspect the network before the code.
+
+### Prerequisites for the suites
+
+The plugin has one optional runtime dependency — [`@deepseek-ai/schemastery`](https://www.npmjs.com/package/@deepseek-ai/schemastery) — used by the live `Config` schema that registers the settings namespace (optional because the import is guarded, so a `link:` install without it still loads and registers the tools). Suites that import the plugin (`config-verify`, `schema-verify`, `empty-verify`, `report-verify`, `http-verify`) need it resolvable from the working tree, so run `npm install` first.
+
+`schema-verify` additionally imports the registry's own validator out of the npm-global `@deepseek-ai/dsh` install (`@deepseek-ai/dsh-tools`); `report-verify` and the engine suites need a real Moli engine, and `empty-verify` needs a C compiler to build its stub engines. On Windows, `@deepseek-ai/schemastery` can be resolved through a directory junction into the fork's `node_modules` from the npm-global DSH tree, the same way the suites resolve `dsh-tools`.
 
 Beyond those, `lib/moli.js` and the tool layer were exercised end to end against Moli 1.1.16 on
 Windows: registration, probe, Markdown and JSON dumps, `eval` (including a tight-timeout regression

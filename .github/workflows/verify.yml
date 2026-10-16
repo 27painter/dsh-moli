@@ -42,6 +42,12 @@ jobs:
           # for commander@15 (>= 22.12.0), undici@8 (>= 22.19.0) and others.
           node-version: '22'
 
+      # The plugin now imports `@deepseek-ai/schemastery` for its live Config
+      # schema, so schema-verify / config-verify need the plugin's own
+      # dependencies installed (the checkout has none).
+      - name: Install plugin dependencies
+        run: npm install --no-audit --no-fund
+
       # schema-verify imports the registry's own validator out of the DSH install
       # (`@deepseek-ai/dsh-tools`), because the plain `ctx.tools.register` path is
       # where two registration failures shipped from. It is not a dependency of the
@@ -74,6 +80,9 @@ jobs:
       - name: empty-verify (successful fetch with no output)
         run: node verify/empty-verify.mjs
 
+      - name: config-verify (settings surface, engine lifecycle, client shape)
+        run: node verify/config-verify.mjs
+
       # The expression-builder half needs no engine; the end-to-end half skips
       # without one, so this is safe on a runner that has no moli.
       - name: scroll-verify (the scroll parameter and what it triggers)
@@ -84,6 +93,12 @@ jobs:
       # network rather than failing, so flaky egress never reddens the build.
       - name: http-verify (failOnHttpError and the response waits)
         run: node verify/http-verify.mjs
+
+      # The link:/junction install route resolves no bare specifier from the
+      # plugin's own node_modules chain. The plugin must still load and register
+      # moli_fetch / moli_probe with the settings form simply absent.
+      - name: link-install-verify (no schemastery, tools still register)
+        run: node verify/link-install-verify.mjs
 
   engine:
     name: engine (${{ matrix.os }})

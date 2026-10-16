@@ -49,7 +49,7 @@ check('the three coexist', ['--wait-response-url', '--wait-response-json', '--wa
 console.log('\n3. the schema declares them');
 const registered = new Map();
 const { apply } = await import(pathToFileURL(join(REPO, 'index.js')).href);
-apply({ tools: { register: d => registered.set(d.name, d) }, logger: { info() {}, warn() {} } }, { insecureTls: true });
+apply({ tools: { register: d => registered.set(d.name, d) }, logger: { info() {}, warn() {} }, on() {}, get: () => null }, { insecureTls: true });
 const tool = registered.get('moli_fetch');
 check('all four are declared', ['failOnHttpError', 'waitResponseUrl', 'waitResponseJson', 'waitScript']
   .every(k => tool.parameters.properties[k] !== undefined));
