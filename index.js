@@ -77,6 +77,22 @@ const FETCH_PARAMETERS = {
       description: 'Readiness stage to wait for. Defaults to `done`.',
     },
     waitSelector: { type: 'string', description: 'Wait until this CSS selector matches.' },
+    waitScript: {
+      type: 'string',
+      description: 'Wait until this JavaScript expression is truthy; a function result is called as the predicate on each poll. More precise than a fixed delay when the page signals readiness in its own terms.',
+    },
+    waitResponseUrl: {
+      type: 'string',
+      description: 'Wait for a response whose original or final URL contains this substring. This is the reliable way to await an AJAX-built list: `wait: "networkidle"` plus a delay is a guess, whereas this waits for the request that actually carries the data.',
+    },
+    waitResponseJson: {
+      type: 'string',
+      description: 'Wait for a response whose JSON field equals a value, written as PATH=VALUE (for example "data.list.0.id=42"). The counterpart to waitResponseUrl when the condition is in the payload rather than the URL.',
+    },
+    failOnHttpError: {
+      type: 'boolean',
+      description: 'Treat a final main-document HTTP status of 400 or above as a failure. Without it an error page comes back as ordinary content and a 404 reads like a successful fetch; with it the result is ok:false and reports the status, while still carrying the rendered body so the error page can be read. Off by default, so existing calls keep their behaviour.',
+    },
     delayMs: { type: 'integer', description: 'Extra milliseconds to wait after readiness.' },
     timeoutMs: { type: 'integer', description: 'Total readiness deadline in milliseconds. Defaults to the plugin configuration.' },
     maxChars: { type: 'integer', description: 'Truncate inline text output to this many characters. Defaults to the plugin configuration.' },
@@ -125,6 +141,7 @@ const FETCH_OUTPUT_SCHEMA = {
     error: { type: 'string' },
     hint: { type: 'string' },
     status: { type: 'integer' },
+    httpError: { type: 'boolean' },
     sandboxTlsBlock: { type: 'boolean' },
     unreachable: { type: 'boolean' },
     possiblyUnreachable: { type: 'boolean' },
@@ -172,6 +189,14 @@ function renderFetch(_args, value) {
     if (value.unreachable === true) lines.push('Cause: the host did not answer; a local forward proxy is the usual fix on this network.');
     else if (value.possiblyUnreachable === true) lines.push('Cause: the host did not answer in time; it may be blocked, or the page may simply be slow.');
     if (typeof value.hint === 'string' && value.hint !== '') lines.push(`Next: ${value.hint}`);
+    // An HTTP error keeps its body under `failOnHttpError`. Reporting the failure
+    // without the body would throw away the error page, which is the part worth
+    // reading -- and for a binary dump the body is the file that was written.
+    if (value.kind === 'binary' && typeof value.path === 'string') {
+      lines.push(`The error page was still written to ${value.path} (${String(value.bytes)} bytes).`);
+    } else if (typeof value.content === 'string' && value.content !== '') {
+      lines.push('', 'The server\'s response body:', '', value.content);
+    }
     return [{ type: 'text', text: lines.join('\n') }];
   }
   if (value.kind === 'binary') {

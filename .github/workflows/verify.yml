@@ -79,6 +79,12 @@ jobs:
       - name: scroll-verify (the scroll parameter and what it triggers)
         run: node verify/scroll-verify.mjs
 
+      # Half of this asserts the parameter-to-flag mapping, which needs nothing but
+      # Node. The other half needs a real 404, and skips when the runner has no
+      # network rather than failing, so flaky egress never reddens the build.
+      - name: http-verify (failOnHttpError and the response waits)
+        run: node verify/http-verify.mjs
+
   engine:
     name: engine (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

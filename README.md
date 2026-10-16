@@ -210,8 +210,9 @@ An unresolvable bundle is **skipped silently** apart from one stderr line
 ## Usage
 
 `moli_fetch` parameters: `url` (required), `dump`, `writeTo`, `eval`, `scroll`, `wait`,
-`waitSelector`, `delayMs`, `timeoutMs`, `maxChars`, `headers`, `userAgent`, `layout`, `scrollbars`,
-`noJs`, `noCss`, `resources`, `withFrames`, `insecureTls`, `profileDir`, `cookieFile`, `proxy`.
+`waitSelector`, `waitScript`, `waitResponseUrl`, `waitResponseJson`, `delayMs`, `timeoutMs`,
+`maxChars`, `headers`, `userAgent`, `layout`, `scrollbars`, `noJs`, `noCss`, `resources`,
+`withFrames`, `insecureTls`, `failOnHttpError`, `profileDir`, `cookieFile`, `proxy`.
 
 ```
 moli_fetch url=https://example.com dump=markdown             # token-efficient text
@@ -243,6 +244,43 @@ scrolled `dump=screenshot` shows that part of the page.
 
 It runs as part of the engine's own pre-capture evaluation and therefore composes with `eval`: the
 scroll happens first, and the expression still returns its own value.
+
+### `failOnHttpError` — stop reading an error page as content
+
+By default a 404 is returned like any other page, so a failed fetch looks successful. Setting
+`failOnHttpError` turns a final status of 400 or above into `ok: false` with the status named — and
+**keeps the body**, because an error page is often the thing you need to read.
+
+```
+moli_fetch url=https://example.com/nope dump=markdown failOnHttpError=true
+```
+
+| | default | `failOnHttpError: true` |
+|---|---|---|
+| a 404 | `ok: true`, the error page as content | `ok: false`, `status: 404`, body still returned |
+| a screenshot of a 404 | written as a normal image | still written, and reported as a failure |
+
+It is off by default so existing calls keep their behaviour. A JSON dump already reported the status
+on its own; markdown and HTML dumps did not, and that is the gap this closes.
+
+### Waiting for what the page actually fetches
+
+`wait: "networkidle"` plus `delayMs` is a guess about how long a list takes to arrive. These wait for
+the request itself:
+
+```
+# the response that carries the data
+moli_fetch url=https://example.com/feed dump=markdown waitResponseUrl="/api/feed"
+
+# the payload, when the URL is not distinctive
+moli_fetch url=https://example.com/feed dump=markdown waitResponseJson="data.list.0.id=42"
+
+# the page's own idea of readiness
+moli_fetch url=https://example.com/app dump=markdown waitScript="window.appReady === true"
+```
+
+`waitResponseJson` takes `PATH=VALUE`, where `PATH` addresses the field and `VALUE` is compared
+literally. Use these when a fixed delay either wastes time or reads the page too early.
 
 ## Relationship to Moli's own agent skills
 
@@ -403,6 +441,13 @@ Four suites live in [`verify/`](verify/), and all are runnable against a working
   `bottom`, nonsense rejected, the caller's `eval` value preserved) and then, when an engine is
   present, fetches a page whose `scroll` handler fills a slot and asserts the content appears with
   `scroll` and the placeholder appears without it — a property of the output, not of an internal call.
+- `http-verify.mjs` asserts the parameter-to-flag mapping directly, because a parameter that never
+  reaches the engine is indistinguishable from a feature that does not work. It then fetches a 404 and
+  checks that `failOnHttpError` reports it while keeping the body, that a healthy page is unaffected,
+  and that a screenshot of an error page is still written as a valid PNG rather than decoded as text.
+  The end-to-end half needs an HTTP error from a real server: loopback is unreachable from inside this
+  sandbox — `curl.exe` times out on `127.0.0.1` while the Node host reaches it — so it uses a path
+  under `example.com` and skips when the network is away.
 
 `.github/workflows/verify.yml` runs `schema-verify`, `empty-verify` and `scroll-verify` on Linux,
 Windows and macOS (they need no engine and no network) and attempts the engine-dependent suites on

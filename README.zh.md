@@ -196,8 +196,9 @@ profile 插件需要两半都齐：依赖边（`dependencies`）+ `dsh.profile.b
 ## 用法
 
 `moli_fetch` 参数：`url`（必填）、`dump`、`writeTo`、`eval`、`scroll`、`wait`、`waitSelector`、
-`delayMs`、`timeoutMs`、`maxChars`、`headers`、`userAgent`、`layout`、`scrollbars`、`noJs`、
-`noCss`、`resources`、`withFrames`、`insecureTls`、`profileDir`、`cookieFile`、`proxy`。
+`waitScript`、`waitResponseUrl`、`waitResponseJson`、`delayMs`、`timeoutMs`、`maxChars`、`headers`、
+`userAgent`、`layout`、`scrollbars`、`noJs`、`noCss`、`resources`、`withFrames`、`insecureTls`、
+`failOnHttpError`、`profileDir`、`cookieFile`、`proxy`。
 
 ```
 moli_fetch url=https://example.com dump=markdown            # 省 token 的正文
@@ -228,6 +229,41 @@ moli_fetch url=https://example.com/feed dump=markdown scroll=-400    # 往回滚
 
 它作为引擎自身"抓取前求值"的一部分执行，因此与 `eval` 可组合：**先滚动，表达式再读取页面，并且仍然返回
 它自己的值**。
+
+### `failOnHttpError` —— 别再把错误页当正文读
+
+默认情况下 404 和普通页面一样被返回，于是**抓取失败看起来是成功的**。加上 `failOnHttpError` 后，最终状态码
+400 及以上会变成 `ok: false` 并报出状态码——**而且保留响应体**，因为错误页往往正是你需要读的东西。
+
+```
+moli_fetch url=https://example.com/nope dump=markdown failOnHttpError=true
+```
+
+| | 默认 | `failOnHttpError: true` |
+|---|---|---|
+| 一个 404 | `ok: true`，错误页作为正文 | `ok: false`、`status: 404`，响应体仍然返回 |
+| 404 的截图 | 当普通图片写出 | 仍然写出，但报告为失败 |
+
+默认关闭，因此现有调用行为不变。JSON dump 本来就能自己报出状态码；markdown 与 HTML 不能，这个开关补的正是
+这个缺口。
+
+### 等待页面真正取回的东西
+
+`wait: "networkidle"` 加 `delayMs` 是在**猜**列表要多久才到。下面这几个等的是请求本身：
+
+```
+# 等待承载数据的那次响应
+moli_fetch url=https://example.com/feed dump=markdown waitResponseUrl="/api/feed"
+
+# URL 不够有特征时，按载荷内容等
+moli_fetch url=https://example.com/feed dump=markdown waitResponseJson="data.list.0.id=42"
+
+# 让页面用自己的方式表示"就绪"
+moli_fetch url=https://example.com/app dump=markdown waitScript="window.appReady === true"
+```
+
+`waitResponseJson` 接收 `PATH=VALUE`：`PATH` 定位字段，`VALUE` 按字面比较。当固定延时不是浪费时间就是读得太
+早时，用这几个。
 
 ## 与 Moli 官方 agent skill 的关系
 
@@ -358,6 +394,11 @@ profile。无论生效的是哪个代理，loopback 地址一律绕过它。
 - `scroll-verify.mjs` 在无引擎时校验表达式构造（像素值、负数、`top`、`bottom`、无效输入被拒、调用方的 `eval`
   值被保留），有引擎时抓取一个"滚动处理器填充槽位"的页面，断言带 `scroll` 时内容出现、不带时只有占位符——
   断言的是**输出**的性质，而不是内部调用。
+- `http-verify.mjs` 直接断言"参数 → 引擎选项"的映射，因为**参数没送到引擎和功能不生效，从外面看是一样的**。
+  随后抓一个 404，验证 `failOnHttpError` 会报告失败同时保留响应体、健康页面不受影响、以及错误页的截图仍然被
+  写为合法 PNG 而不是被当文本解码。端到端部分需要一个真实服务器的 HTTP 错误：**本沙箱内无法访问 loopback**
+  ——`curl.exe` 连 `127.0.0.1` 会超时，而 Node 宿主进程可以——所以它用 `example.com` 下的一个路径，网络不可用
+  时跳过。
 
 `.github/workflows/verify.yml` 在 Linux、Windows、macOS 上跑 `schema-verify`、`empty-verify` 与
 `scroll-verify`（无需引擎、无需网络），在 Linux 与 Windows 上尝试依赖引擎的几套；若 runner 上没有引擎，
