@@ -11,11 +11,15 @@
 // particular site staying client-rendered.
 import { spawnSync } from 'node:child_process';
 import { existsSync, rmSync, statSync } from 'node:fs';
-import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { dirname, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const pluginDir = process.argv[2] ?? 'D:/dsh_plugins/dsh-moli';
-const here = new URL('.', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/u, '$1');
+// The default plugin dir is the workspace root (this file lives in verify/), the
+// same rule schema-verify.mjs uses. argv[2] still overrides it for hosts that
+// target an installed copy. A hardcoded `D:/dsh_plugins/dsh-moli` here would make
+// this file Windows-only, which is the defect PR #4 removed from schema-verify.
+const here = dirname(fileURLToPath(import.meta.url));
+const pluginDir = process.argv[2] ?? dirname(here);
 const isWindows = process.platform === 'win32';
 const stubs = {
   noop: join(here, isWindows ? 'noop-engine.exe' : 'noop-engine'),
