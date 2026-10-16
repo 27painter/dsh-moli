@@ -1,0 +1,65 @@
+name: publish
+
+# Publishes to npm through GitHub's OIDC identity -- no npm token anywhere.
+#
+# Why this replaces `npm publish` from a laptop: the machine's npm credential was
+# a classic token that bypasses 2FA, and npm is retiring those ("npm tokens that
+# bypass 2FA are being restricted for account changes and direct publishing").
+# When such a token is revoked, npm answers a publish attempt with HTTP 404
+# ("the requested resource could not be found or you do not have permission"),
+# which reads as a missing package rather than a dead credential. Publishing
+# through OIDC removes the credential entirely, so there is nothing to expire.
+#
+# One-time setup on npmjs.com: package -> Settings -> Trusted Publisher ->
+# GitHub Actions, with
+#     Organization or user : 27painter
+#     Repository           : dsh-moli
+#     Workflow filename    : publish.yml
+#     Environment          : (leave empty)
+# and allow the `npm publish` action.
+#
+# Release with: bump the version, commit, then tag and push:
+#     git tag v1.1.6 && git push origin v1.1.6
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  id-token: write   # required for OIDC
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Trusted publishing needs Node >= 22.14 and npm >= 11.5.1.
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false   # never cache in a release build
+
+      # The tag and package.json must agree, or the published version is a lie.
+      - name: Version matches the tag
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p "require('./package.json').version")"
+          echo "tag=$tag package=$pkg"
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match package.json version $pkg"
+            exit 1
+          fi
+
+      - name: Verify before publishing
+        run: |
+          node verify/schema-verify.mjs
+          node verify/empty-verify.mjs
+
+      - name: Publish
+        run: npm publish

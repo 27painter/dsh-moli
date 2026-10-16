@@ -348,6 +348,30 @@ dump、`eval`（含针对 `-t` 参数位置的紧超时回归防护）、PNG 与
 30 处真实结果匹配。另有一个装了本插件的一次性 profile，组合其配置时既无 `JsonSchemaError` 也无被跳过的
 bundle。
 
+## 发布
+
+发布走 GitHub Actions 的 OIDC 身份，**本机不存任何 npm token，因此没有会失效的凭据**：
+
+```bash
+npm version patch          # 或 minor / major
+git push && git tag v1.1.6 && git push origin v1.1.6
+```
+
+`.github/workflows/publish.yml` 会先校验 tag 与 `package.json` 版本一致、跑离线测试套件，然后发布。
+npmjs.com 上需要一次性配置：**package → Settings → Trusted Publisher → GitHub Actions**，用户
+`27painter`、仓库 `dsh-moli`、workflow 文件名 `publish.yml`，并允许 `npm publish` 动作。
+
+**不要再用本机存储的 token 发布。** 这台机器原先配的是一个绕过 2FA 的 classic token，npm 正在淘汰这类
+token；它被吊销后，发布会报：
+
+```
+E404 Not Found - PUT https://registry.npmjs.org/dsh-moli
+     The requested resource 'dsh-moli@1.1.5' could not be found or you do not have permission
+```
+
+**这看起来像"包不存在"，实际是认证失败。** 任何本地发布之前先跑
+`node scripts/preflight-publish.mjs`：它会告诉你凭据能否认证，不能时明确点出这个误导性的 404。
+
 ## 许可
 
 MIT，见 [LICENSE](LICENSE)。
