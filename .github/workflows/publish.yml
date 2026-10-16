@@ -35,14 +35,13 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           # Trusted publishing needs Node >= 22.14 and npm >= 11.5.1.
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
-          package-manager-cache: false   # never cache in a release build
 
       # The tag and package.json must agree, or the published version is a lie.
       - name: Version matches the tag
@@ -56,10 +55,13 @@ jobs:
             exit 1
           fi
 
-      - name: Verify before publishing
-        run: |
-          node verify/schema-verify.mjs
-          node verify/empty-verify.mjs
+      # empty-verify only: it drives compiled stub engines, so it needs neither the
+      # network nor a DSH install. schema-verify is deliberately NOT run here --
+      # it imports the registry's validator out of `@deepseek-ai/dsh`, which this
+      # job does not install, and a release should not depend on that. It runs in
+      # .github/workflows/verify.yml, which does install it.
+      - name: Verify (no engine, no network)
+        run: node verify/empty-verify.mjs
 
       - name: Publish
         run: npm publish
