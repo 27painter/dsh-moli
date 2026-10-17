@@ -1,12 +1,14 @@
 # dsh-moli
 
+[![npm 版本](https://img.shields.io/npm/v/dsh-moli)](https://www.npmjs.com/package/dsh-moli)
+[![license](https://img.shields.io/npm/l/dsh-moli)](LICENSE)
+[![已收录于 awesome-dsh-plugin](https://img.shields.io/badge/awesome--dsh--plugin-%E5%B7%B2%E6%94%B6%E5%BD%95-3964fe)](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)
+
 **两个工具，让 DeepSeek Harness 的 agent 能驱动真正的无头浏览器。** 它们封装
 [Moli](https://github.com/lexmount/moli)——一个专为 AI agent 打造的 Rust 无头浏览器——所以 agent 能看到
 那些"必须跑完 JavaScript 才存在"的页面内容，也能把它们拍成图。
 
 [English](README.md) | 中文
-
-> 已收录于 [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin) 的 **browser** 分类。
 
 ## 它做什么，什么时候需要它
 

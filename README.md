@@ -2,14 +2,13 @@
 
 [![npm version](https://img.shields.io/npm/v/dsh-moli)](https://www.npmjs.com/package/dsh-moli)
 [![license](https://img.shields.io/npm/l/dsh-moli)](LICENSE)
+[![listed in awesome-dsh-plugin](https://img.shields.io/badge/awesome--dsh--plugin-listed-3964fe)](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)
 
 **Two tools that let a DeepSeek Harness agent drive a real headless browser.** They wrap
 [Moli](https://github.com/lexmount/moli) — a Rust headless browser built for AI agents — so an agent can
 read pages that only exist after JavaScript runs, and can produce pictures of them.
 
 English | [中文](README.zh.md)
-
-> Listed in [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin) under **browser**.
 
 ## What it does, and when you want it
 
