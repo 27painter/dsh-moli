@@ -42,7 +42,7 @@ if (exe === undefined) {
 } else {
   const registered = new Map();
   const { apply } = await import(pathToFileURL(join(REPO, 'index.js')).href);
-  apply({ tools: { register: d => registered.set(d.name, d) }, logger: { info() {}, warn() {} } }, { insecureTls: true });
+  apply({ tools: { register: d => registered.set(d.name, d) }, logger: { info() {}, warn() {} }, on() {}, get: () => null }, { insecureTls: true });
   const tool = registered.get('moli_fetch');
   const run = args => tool.execute({ ...args, timeoutMs: 60000 }, {});
 

@@ -75,7 +75,7 @@ console.log('\n2. checksum mismatch refuses to execute');
 const bad = await installMoli({ installerUrl, expectedSha256: 'deadbeef'.repeat(8), timeoutMs: 60000, locate: () => undefined });
 check('failed', bad.ok === false);
 check('reason is the mismatch', /checksum mismatch/u.test(String(bad.error)), String(bad.error).slice(0, 60));
-check('reported the actual digest', bad.sha256 === installerSha);
+check('reported the actual digest', bad.installerSha256 === installerSha);
 check('refused to execute', /Refusing/u.test(String(bad.note)));
 check('nothing ran', !existsSync(marker));
 

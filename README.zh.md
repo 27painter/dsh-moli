@@ -289,9 +289,10 @@ Moli 仓库自带官方 agent skill：[`moli-webfetch`](https://github.com/lexmo
    重定向到临时文件再读回。
 2. **二进制按原始字节落盘。** PowerShell 的 `>` 会把原生程序输出按 UTF-16 重编码（每字节后插
    `00`），截图因此损坏。这里直接写字节，PNG 签名保持 `89504e470d0a1a0a`。
-3. **零外部依赖。** profile 插件按磁盘真实路径加载（`link:` 依赖仍是符号链接目标），任何裸包名
-   导入（例如 `@deepseek-ai/schemastery`）都会解析到插件目录而非 profile 的 `node_modules`，导致
-   插件加载失败。本插件只导入 `node:` 内置模块和自己的文件。
+3. **一个可选的外部依赖。** profile 插件按磁盘真实路径加载（`link:` 依赖仍是符号链接目标），任何裸包名
+   导入（例如 `@deepseek-ai/schemastery`）都会解析到插件目录而非 profile 的 `node_modules`。因此该导入
+   是**受保护的**：没有 schemastery（`link:` 安装）时设置界面不出现、插件退化为纯补丁层配置，而
+   `moli_fetch` 与 `moli_probe` 照常注册；有它（普通 npm 安装会自动带上）时设置页面可用。
 
 ## 平台支持
 
@@ -328,7 +329,7 @@ cookie 驱动的查询参数。那次实测同时覆盖了代理下载路由与�
 
 ## 配置
 
-在 profile 的补丁层里覆盖 `config`，全部可选：
+在 profile 的补丁层里覆盖 `config`，全部可选。也可以在图 **Moli 设置** 界面里编辑（见下方「设置页入口」）。
 
 ```yaml
 - insert:
@@ -348,6 +349,32 @@ profile。无论生效的是哪个代理，loopback 地址一律绕过它。
 未设置 `exePath` 时探测顺序：`exePath` → 环境变量 `MOLI_BIN` → `%LOCALAPPDATA%\Moli\bin\moli.exe`
 → `%USERPROFILE%\.local\bin\moli.exe`，随后还会在 `%LOCALAPPDATA%\Moli` 内递归查找 `moli.exe`，
 所以装在带版本号的子目录里也能找到。
+
+### 设置页入口
+
+插件自带一个**设置界面**，挂在插件管理页的对应插件条目上（`plugins.bundle.config` 槽位，由浏览器端
+`client.js` 注册）。两种方式进入：
+
+1. **插件管理页**：打开 DSH Web 界面的插件管理页，找到 **dsh-moli** 条目，其配置区即是本设置界面；
+   引擎状态、安装/卸载按钮、以及下方所有配置字段都在这里编辑。
+2. **直接改 profile**：按上面的 YAML 改 `cordis.patch.yml` 同样生效，两边是同一份 `config`，保存即同步。
+
+设置界面跟随 DSH 当前语言（内置 `zh` / `en`，英语兜底），布尔字段（如 `insecureTls`）以下拉选择
+**原始值**（`true` / `false`）显示，不做本地化翻译。
+
+### 引擎生命周期（设置页的「引擎」行）
+
+设置界面顶部有一条**引擎**状态行，自动检测已安装的引擎，并可一键安装/卸载，无需动 profile：
+
+- **状态** — `engineState` 为 `installed`（同时给出 `engineVersion`）、`missing`，或一段简短错误文本。
+- **安装** — 点「安装引擎」后表单写入 `engineAction: "install"`，主机异步下载并运行官方安装器，
+  完成后通过 `engineState` / `engineVersion` 回写结果。
+- **卸载** — 「卸载引擎」写入 `engineAction: "uninstall"`。Windows 上只删除安装器所属的
+  `%LOCALAPPDATA%\Moli` 目录树；没有该目录树时**不触碰任何文件**。POSIX 上删除定位到的二进制，
+  并清理随之变空的安装目录。
+
+`engineAction` / `engineState` / `engineVersion` 三个字段属于动态 Config schema（`engineAction` 是
+`none` / `install` / `uninstall` 三选一），设计上由设置界面驱动；日常改配置请优先用上面的四个字段。
 
 ## 已知限制
 
@@ -376,8 +403,13 @@ profile。无论生效的是哪个代理，loopback 地址一律绕过它。
 
 ## 验证情况
 
-[`verify/`](verify/) 下有四个可直接对工作区运行的测试：
+[`verify/`](verify/) 下有八个可直接对工作区运行的测试：
 
+- `config-verify.mjs` 检查设置面与引擎生命周期：动态 `Config` schema（每个已声明字段、`engineAction`
+  为 `none`/`install`/`uninstall` 三选一）、`apply` 同时接受普通配置与动态 `.get()` 引用、
+  `settings/document-updated` 接线、`uninstallMoli`（平台感知：POSIX 删除定位到的二进制，Windows
+  只删除安装器所属的 `%LOCALAPPDATA%\Moli` 目录树）、以及 client.js 的形状（`plugins.bundle.config`
+  注册、zh/en 词典、`true`/`false` 下拉显示原始值）。
 - `schema-verify.mjs` 用注册表自己的校验器检查工具定义，并带有断言"两种非法 schema 形状仍会被拒"的对照组。
 - `install-verify.mjs` 用本地回环 HTTP 服务器驱动安装链路：路由顺序、被提供字节的 SHA256、校验不匹配时
   拒绝执行、匹配时真正执行、以及全部路径失败的诊断。
@@ -400,9 +432,21 @@ profile。无论生效的是哪个代理，loopback 地址一律绕过它。
   ——`curl.exe` 连 `127.0.0.1` 会超时，而 Node 宿主进程可以——所以它用 `example.com` 下的一个路径，网络不可用
   时跳过。
 
-`.github/workflows/verify.yml` 在 Linux、Windows、macOS 上跑 `schema-verify`、`empty-verify` 与
-`scroll-verify`（无需引擎、无需网络），在 Linux 与 Windows 上尝试依赖引擎的几套；若 runner 上没有引擎，
-则报告为跳过而不是失败。
+### 测试前置条件
+
+插件有一个可选的运行期依赖——[`@deepseek-ai/schemastery`](https://www.npmjs.com/package/@deepseek-ai/schemastery)，
+由动态 `Config` schema（注册设置命名空间的那份）使用。凡是 import 插件本体的套件（`config-verify`、
+`schema-verify`、`empty-verify`、`report-verify`、`http-verify`）都需要它能从工作区解析，所以先跑
+`npm install`。
+
+`schema-verify` 额外需要从 npm 全局安装的 `@deepseek-ai/dsh` 里 import 注册表自己的校验器
+（`@deepseek-ai/dsh-tools`）；`report-verify` 与引擎类套件需要真实 Moli 引擎，`empty-verify` 需要
+C 编译器来构建它的桩引擎。在 Windows 上，`@deepseek-ai/schemastery` 可以通过目录 junction 指到
+npm 全局 DSH 树来解析（与套件解析 `dsh-tools` 的方式相同）。
+
+`.github/workflows/verify.yml` 在 Linux、Windows、macOS 上跑 `schema-verify`、`empty-verify`、
+`scroll-verify` 与 `http-verify`（无需引擎、无需网络），在 Linux 与 Windows 上尝试依赖引擎的几套；
+若 runner 上没有引擎，则报告为跳过而不是失败。
 
 `report-verify.mjs` **故意不放进 CI**：其中三项会抓 `example.com`，还有一项抓一个具体的论坛帖子，因此它
 需要能上外网——如果这台机器的流量走代理，还需要那个代理可用。有网络时它是有用的，但**一个因为网站改版就变

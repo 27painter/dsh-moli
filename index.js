@@ -1,19 +1,27 @@
 /** Host half of dsh-moli: expose the local `moli` headless browser as callable tools. */
-import { MANUAL_INSTALL, installMoli } from './lib/install.js';
-import { findMoli, moliCandidates, probe, runFetch } from './lib/moli.js';
+import { MANUAL_INSTALL, installMoli, uninstallMoli } from './lib/install.js';
+import { findMoli, moliCandidates, moliVersion, probe, runFetch } from './lib/moli.js';
 
 export const name = 'dsh-moli';
 export const inject = ['tools'];
 
 /**
- * This plugin deliberately imports nothing but `node:` builtins and its own
- * files. A profile plugin is loaded from its real path on disk (a `link:`
- * dependency stays a symlink target), so a bare specifier such as
- * `@deepseek-ai/schemastery` would resolve against the plugin directory
- * instead of the profile's `node_modules` and fail to load. The registry
- * validates parameters and results itself, so `defineTool` and a Schema-based
- * config are not needed; configuration is read defensively from the patch layer.
+ * `@deepseek-ai/schemastery` powers the live Config schema and therefore the
+ * settings namespace. A profile plugin is loaded from its real path on disk (a
+ * `link:` dependency stays a symlink target), so a bare specifier must resolve
+ * against the plugin's own `node_modules` chain — which does not exist when the
+ * plugin is installed as a `link:`/junction (the README's first install route).
+ * The import is therefore optional: without schemastery the settings form does
+ * not appear and the plugin degrades to plain patch-layer configuration, while
+ * `moli_fetch` / `moli_probe` keep registering — those are the plugin's reason
+ * to exist, and losing them would be worse than losing the form.
  */
+let z;
+try {
+  z = (await import('@deepseek-ai/schemastery')).default;
+} catch {
+  z = undefined;
+}
 
 /** Deployment configuration defaults; override via the plugin's `config` entry. */
 const DEFAULTS = {
@@ -26,6 +34,35 @@ const DEFAULTS = {
   // certificate checks on a network that can reach the responders.
   insecureTls: true,
 };
+
+/**
+ * Live Config schema. Declaring it (and exporting it) makes DSH register the
+ * `dsh-moli` settings namespace, which the browser half's `plugins.bundle.config`
+ * form edits. `.volatile()` marks the whole object live so the namespace appears
+ * in the settings describe mirror and the form's writes are applied via the
+ * ConfigEditor / volatile HMR path.
+ *
+ * `undefined` when `@deepseek-ai/schemastery` cannot be resolved (a `link:`
+ * install) — then no settings namespace is registered and the engine lifecycle
+ * is skipped, but the tools still register.
+ */
+export const Config = z
+  ? z.object({
+    defaultTimeoutMs: z.number().default(DEFAULTS.defaultTimeoutMs),
+    maxChars: z.number().default(DEFAULTS.maxChars),
+    insecureTls: z.boolean().default(DEFAULTS.insecureTls),
+    proxy: z.string().default(''),
+    exePath: z.string().default(''),
+    // Engine lifecycle, driven by the settings form. The form writes an action
+    // (`install` / `uninstall`) and the Host executes it asynchronously, then
+    // reports the outcome back through `engineState` / `engineVersion` and resets
+    // `engineAction` to `none`. `engineState` is `installed`, `missing`, or a
+    // short error text.
+    engineAction: z.union([z.const('none'), z.const('install'), z.const('uninstall')]).default('none'),
+    engineState: z.string().default('unknown'),
+    engineVersion: z.string().default(''),
+  }).volatile()
+  : undefined;
 
 /**
  * Parameter schema of `moli_fetch`.
@@ -265,7 +302,10 @@ function renderProbe(_args, value) {
  * @param config - deployment configuration for paths, timeout, and output size.
  */
 export function apply(ctx, config) {
-  const options = config ?? {};
+  // The Config schema is declared volatile, so DSH hands it as a live reference
+  // whose `.get()` reads the current values; a deployment that mounts an older
+  // loader without volatile wiring passes a plain object instead. Read either.
+  const options = typeof config?.get === 'function' ? config.get() : (config ?? {});
   // Mutable: a successful install resolves a path this process can use at once,
   // without waiting for a restart to re-run discovery.
   let cachedExe = findMoli(options.exePath);
@@ -383,6 +423,168 @@ export function apply(ctx, config) {
       };
     },
   });
+
+  // ── engine lifecycle via the settings form ─────────────────────────────
+  // The browser half's `plugins.bundle.config` form drives install/uninstall
+  // through the `engineAction` field and reads the outcome from
+  // `engineState`/`engineVersion`. State is written back only when it changes,
+  // and a finished action always resets `engineAction` to `none`, so the
+  // resulting `settings/document-updated` re-entry lands in the plain sync
+  // branch instead of looping the action.
+  //
+  // Everything here depends on the settings namespace, which exists only when
+  // schemastery resolved (see the `Config` export): without it there is no form
+  // to drive the lifecycle, so the whole block is skipped and the plugin is
+  // pure tool registration.
+  if (Config) {
+  const NS = 'dsh-moli';
+  let engineBusy = false;
+  const currentConfig = () => (typeof config.get === 'function' ? config.get() : (config ?? {}));
+  // Write settings outside the current HMR transaction. `settings.update`
+  // routes through dsh-hmr's runExclusive, which rejects when it is called
+  // from inside an active transaction — the settings/document-updated event
+  // handler runs in one, so a direct update throws
+  // "HMR transactions cannot be nested" and the write-back is silently lost
+  // (the form then stays on "working…" forever). setImmediate defers the
+  // update until the event transaction has exited.
+  const writeSettings = (settings, patch) =>
+    new Promise((resolve, reject) => {
+      setImmediate(() => {
+        settings.update(NS, patch).then(resolve, reject);
+      });
+    });
+  const syncEngineState = async (settings, current) => {
+    const exe = findMoli(current.exePath);
+    const state = exe === undefined ? 'missing' : 'installed';
+    const version = exe === undefined ? '' : (moliVersion(exe) ?? '');
+    if (current.engineState === state && current.engineVersion === version) return;
+    try {
+      await writeSettings(settings, { engineState: state, engineVersion: version });
+    } catch (error) {
+      console.error(`[dsh-moli] engine-state sync failed: ${String(error?.message ?? error)}`);
+      ctx.logger?.warn?.('dsh-moli: engine-state sync failed', String(error?.message ?? error));
+    }
+  };
+  const runEngineAction = async (settings, current, action) => {
+    if (engineBusy) return;
+    engineBusy = true;
+    try {
+      if (action === 'install') {
+        const outcome = await installMoli({
+          exePath: current.exePath,
+          timeoutMs: 180000,
+          proxy: current.proxy,
+          locate: findMoli,
+          candidates: moliCandidates(current.exePath),
+        });
+        cachedExe = outcome.ok === true ? (outcome.exe ?? cachedExe) : cachedExe;
+        await writeSettings(settings, {
+          engineAction: 'none',
+          engineState: outcome.ok === true ? 'installed' : `install failed: ${String(outcome.error ?? 'unknown error').slice(0, 200)}`,
+          engineVersion: outcome.ok === true ? String(outcome.version ?? '') : '',
+        });
+      } else if (action === 'uninstall') {
+        const removed = uninstallMoli(current.exePath);
+        cachedExe = undefined;
+        await writeSettings(settings, {
+          engineAction: 'none',
+          engineState: removed === undefined ? 'uninstall failed: nothing to remove' : 'missing',
+          engineVersion: '',
+        });
+      }
+    } catch (error) {
+      // console (not ctx.logger) so the failure reaches the service journal
+      console.error(`[dsh-moli] engine action failed: ${String(error?.message ?? error)}`);
+      ctx.logger?.error?.('dsh-moli: engine action failed', String(error?.message ?? error));
+      try {
+        await writeSettings(settings, {
+          engineAction: 'none',
+          engineState: `action failed: ${String(error?.message ?? error).slice(0, 200)}`,
+        });
+      } catch (error2) {
+        console.error(`[dsh-moli] engine action failure report could not be written back: ${String(error2?.message ?? error2)}`);
+        ctx.logger?.error?.('dsh-moli: engine action failure report could not be written back', String(error2?.message ?? error2));
+      }
+    } finally {
+      engineBusy = false;
+    }
+  };
+  // Dispatch an engineAction if one is pending, otherwise sync state. Shared by
+  // the settings update handler and the boot-time initial sync, so an action
+  // whose `settings/document-updated` event was lost (a crash between the
+  // form's write and the handler) is still picked up on the next boot instead
+  // of leaving the form stuck on "processing".
+  // The event fires inside a dsh-hmr transaction. That transaction propagates
+  // through AsyncLocalStorage into anything the handler spawns — including
+  // setTimeout/setImmediate callbacks — so a deferred settings.update still
+  // nests and is rejected ("HMR transactions cannot be nested"). dsh-hmr
+  // itself escapes its own transaction with `executing.exit(...)` (watchConfig
+  // does this); running the dispatch through the same exit clears the ALS
+  // store so the write-back opens its own outermost transaction. The poller
+  // below stays as a defensive fallback (exit missing, or an event lost
+  // between the form's write and the handler).
+  const dispatchOutsideTransaction = (settings) => {
+    const hmr = ctx.get?.('hmr');
+    const run = () => {
+      const current = currentConfig();
+      const action = current.engineAction;
+      if (action === 'install' || action === 'uninstall') void runEngineAction(settings, current, action);
+      else void syncEngineState(settings, current);
+    };
+    if (hmr && typeof hmr.executing?.exit === 'function') {
+      hmr.executing.exit(run);
+    } else {
+      run();
+    }
+  };
+  // Actions are driven by an independent poller as a fallback, and by the
+  // transaction-escaped dispatch on the event path. A setInterval callback
+  // runs in the timer phase, outside any transaction, so the action and its
+  // write-back are safe there too.
+  let pollTimer = null;
+  let pendingCheck = false;
+  const pollCheck = () => {
+    const settings = ctx.get('settings');
+    if (!settings) return;
+    const current = currentConfig();
+    const action = current.engineAction;
+    if (action === 'install' || action === 'uninstall') {
+      void runEngineAction(settings, current, action);
+    } else {
+      void syncEngineState(settings, current);
+    }
+  };
+  ctx.on?.('settings/document-updated', (id) => {
+    if (id !== NS) return;
+    const settings = ctx.get('settings');
+    if (!settings) return;
+    pendingCheck = true;
+    dispatchOutsideTransaction(settings);
+  });
+  pollTimer = setInterval(() => {
+    if (pendingCheck) {
+      pendingCheck = false;
+      pollCheck();
+    }
+  }, 500);
+  pollTimer.unref?.();
+  // Initial state once settings is live. `ctx.get('settings')` may be null in a
+  // boot-time effect (the service mounts later), so retry briefly; the poller
+  // also picks up any pending engineAction written before the service settled.
+  let syncAttempts = 0;
+  const tryInitialSync = () => {
+    const settings = ctx.get('settings');
+    if (!settings) return false;
+    pollCheck();
+    return true;
+  };
+  if (!tryInitialSync()) {
+    const timer = setInterval(() => {
+      if (tryInitialSync() || ++syncAttempts >= 40) clearInterval(timer);
+    }, 250);
+    timer.unref?.();
+  }
+  }
 
   ctx.logger?.info?.(`dsh-moli: registered moli_fetch and moli_probe (${cachedExe ?? 'moli missing'})`);
 }

@@ -1,12 +1,26 @@
 // Inspect the published dsh-moli package state precisely.
 import { spawnSync } from 'node:child_process';
-import { openSync, closeSync, readFileSync, existsSync, unlinkSync } from 'node:fs';
-import { join } from 'node:path';
+import { openSync, closeSync, readFileSync, existsSync, unlinkSync, mkdtempSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const exe = join(process.env.LOCALAPPDATA, 'Moli', 'bin', 'moli.exe');
+// This script runs at publish time on the server, which is POSIX, so it cannot
+// hard-code LOCALAPPDATA (undefined there — path.join would throw). Resolve the
+// engine through the plugin's own cross-platform findMoli and fall back to the
+// platform's home layout, like lib/moli.js itself does.
+const REPO = fileURLToPath(new URL('..', import.meta.url));
+const { findMoli } = await import(pathToFileURL(join(REPO, 'lib', 'moli.js')).href);
+const exe = findMoli(undefined)
+  ?? (process.platform === 'win32'
+    ? join(process.env.LOCALAPPDATA ?? '', 'Moli', 'bin', 'moli.exe')
+    : join(homedir(), '.local', 'bin', 'moli'));
 
 function fetchJson(url) {
-  const out = 'pkg.tmp';
+  // A unique file in the OS temp dir: a fixed 'pkg.tmp' in the cwd collides
+  // across parallel runs and litters the tree.
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-moli-npm-state-'));
+  const out = join(dir, 'capture.json');
   const fd = openSync(out, 'w');
   const r = spawnSync(exe, ['fetch', url, '-d', 'json', '--insecure-disable-tls-host-verification', '-t', '45000'],
     { stdio: ['ignore', fd, 'ignore'], timeout: 90000 });

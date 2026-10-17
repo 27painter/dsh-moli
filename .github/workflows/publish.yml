@@ -60,6 +60,12 @@ jobs:
       # it imports the registry's validator out of `@deepseek-ai/dsh`, which this
       # job does not install, and a release should not depend on that. It runs in
       # .github/workflows/verify.yml, which does install it.
+      #
+      # The plugin imports `@deepseek-ai/schemastery` for its live Config schema,
+      # so empty-verify needs the plugin's own dependencies in the checkout.
+      - name: Install plugin dependencies
+        run: npm install --no-audit --no-fund
+
       - name: Verify (no engine, no network)
         run: node verify/empty-verify.mjs
 

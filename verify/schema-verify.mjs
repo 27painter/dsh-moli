@@ -123,7 +123,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const pluginDir = process.argv[2] ?? dirname(here);
 const registered = new Map();
 const { apply } = await import(pathToFileURL(join(pluginDir, 'index.js')).href);
-apply({ tools: { register: d => registered.set(d.name, d) }, logger: { info() {}, warn() {} } },
+apply({ tools: { register: d => registered.set(d.name, d) }, logger: { info() {}, warn() {} }, on() {}, get: () => null },
   { insecureTls: true, proxy: 'http://127.0.0.1:7890' });
 
 let pass = 0;

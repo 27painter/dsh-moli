@@ -75,7 +75,7 @@ if (!haveNoop || !haveFailing || !haveWarning) {
 // ---- load the plugin --------------------------------------------------------
 const registered = new Map();
 const { apply } = await import(pathToFileURL(join(pluginDir, 'index.js')).href);
-apply({ tools: { register: d => registered.set(d.name, d) }, logger: { info() {}, warn() {} } },
+apply({ tools: { register: d => registered.set(d.name, d) }, logger: { info() {}, warn() {} }, on() {}, get: () => null },
   { insecureTls: true, exePath: stubs.noop });
 const fetchTool = registered.get('moli_fetch');
 
@@ -107,7 +107,7 @@ check('points at noJs as the cause', /noJs/u.test(text));
 
 // ---- 4. a real failure still fails -----------------------------------------
 console.log('\n4. control: a non-zero exit is still a failure');
-apply({ tools: { register: d => registered.set(d.name, d) }, logger: { info() {}, warn() {} } },
+apply({ tools: { register: d => registered.set(d.name, d) }, logger: { info() {}, warn() {} }, on() {}, get: () => null },
   { insecureTls: true, exePath: stubs.failing });
 const failingTool = registered.get('moli_fetch');
 const bad = await failingTool.execute({ url: 'https://example.invalid/', dump: 'markdown' }, {});
@@ -118,7 +118,7 @@ check('render says failed', /failed/u.test(failingTool.output.render({}, bad)[0]
 
 // ---- 5. exit 0, empty stdout, but stderr speaks: still a failure -------------
 console.log('\n5. control: stderr with no stdout is not an empty page');
-apply({ tools: { register: d => registered.set(d.name, d) }, logger: { info() {}, warn() {} } },
+apply({ tools: { register: d => registered.set(d.name, d) }, logger: { info() {}, warn() {} }, on() {}, get: () => null },
   { insecureTls: true, exePath: stubs.warning });
 const warnTool = registered.get('moli_fetch');
 const warned = await warnTool.execute({ url: 'https://example.invalid/', dump: 'markdown' }, {});
