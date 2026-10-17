@@ -9,6 +9,8 @@ read pages that only exist after JavaScript runs, and can produce pictures of th
 
 English | [中文](README.zh.md)
 
+> Listed in [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin) under **browser**.
+
 ## What it does, and when you want it
 
 A plain HTTP fetch returns the HTML the server sent. That is enough for articles, docs and APIs, and

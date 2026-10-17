@@ -6,6 +6,8 @@
 
 [English](README.md) | 中文
 
+> 已收录于 [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin) 的 **browser** 分类。
+
 ## 它做什么，什么时候需要它
 
 普通的 HTTP 抓取拿回的是服务器发来的 HTML。对文章、文档、API 来说这足够了，DSH 的 `web_fetch` 已经覆盖
