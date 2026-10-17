@@ -189,6 +189,7 @@ const FETCH_OUTPUT_SCHEMA = {
     sandboxTlsBlock: { type: 'boolean' },
     unreachable: { type: 'boolean' },
     possiblyUnreachable: { type: 'boolean' },
+    conditionTimedOut: { type: 'boolean' },
     note: { type: 'string' },
   },
 };
@@ -232,6 +233,10 @@ function renderFetch(_args, value) {
     if (value.sandboxTlsBlock === true) lines.push('Cause: the DSH sandbox blocks Schannel client credentials (HTTPS only).');
     if (value.unreachable === true) lines.push('Cause: the host did not answer; a local forward proxy is the usual fix on this network.');
     else if (value.possiblyUnreachable === true) lines.push('Cause: the host did not answer in time; it may be blocked, or the page may simply be slow.');
+    // A wait that never resolved is the one failure that is definitely not the
+    // network: the page arrived and was parsed. Saying so up front keeps the caller
+    // from spending their time on a proxy that was never the problem.
+    else if (value.conditionTimedOut === true) lines.push('Cause: the page loaded, but the wait condition never became true — this is not a network problem.');
     if (typeof value.hint === 'string' && value.hint !== '') lines.push(`Next: ${value.hint}`);
      // An HTTP error keeps its body under `failOnHttpError`. Reporting the failure
     // without the body would throw away the error page, which is the part worth

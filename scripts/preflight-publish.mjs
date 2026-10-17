@@ -108,5 +108,9 @@ if (failed) {
   // stack trace instead of printing its own verdict.
   process.exitCode = 1;
 } else {
-  console.log(`Safe to publish. From this directory:\n\n  npm publish\n\nThen tag the release:\n\n  git tag v${pkg.version} && git push origin v${pkg.version}`);
+  // No `git push` in this message on purpose: pushing a tag used to publish, and
+  // does not any more (`publish.yml` is dispatch-only), so a release here is a
+  // local commit, a publish, and optionally a local tag. Pushing is a separate
+  // decision that costs CI runs on the repository.
+  console.log(`Safe to publish. From this directory:\n\n  npm publish\n\nThen mark the release locally, and push whenever you choose to:\n\n  git tag v${pkg.version}`);
 }

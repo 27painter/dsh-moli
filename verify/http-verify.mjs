@@ -136,6 +136,40 @@ if (exe === undefined) {
       JSON.stringify(String(scrolled.content).slice(0, 60)));
     check('the content is bigger than a scroll offset', String(scrolled.content).length > 100,
       `${String(String(scrolled.content).length)} chars`);
+
+    // A wait that never resolved is the one failure that is definitely not the
+    // network. It used to be reported as "the host did not answer in time, retry or
+    // set a proxy", which sent the caller to check the part of the setup that was
+    // working. Measured before the fix: waitSelector on an element that is not on the
+    // page produced exactly that message.
+    console.log('\n8. a wait that never resolves is not blamed on the network');
+    for (const [label, extra, needle] of [
+      ['selector', { waitSelector: '#definitely-not-here-27' }, /selector '#?\w|never matched/iu],
+      ['script', { waitScript: 'window.__neverTrue === true' }, /never became truthy/iu],
+      ['response', { waitResponseUrl: '/never-requested-27' }, /response matching that condition/iu],
+    ]) {
+      const waited = await run({ url: 'https://example.com/', timeoutMs: 8000, ...extra });
+      check(`${label} wait times out`, waited.ok === false, `ok=${String(waited.ok)}`);
+      check(`${label}: flagged as a condition timeout`, waited.conditionTimedOut === true,
+        `conditionTimedOut=${String(waited.conditionTimedOut)}`);
+      check(`${label}: not reported as unreachable`, waited.possiblyUnreachable === false,
+        `possiblyUnreachable=${String(waited.possiblyUnreachable)}`);
+      check(`${label}: the hint says it is not a network problem`, /not a network problem/iu.test(String(waited.hint)),
+        JSON.stringify(String(waited.hint).slice(0, 60)));
+      check(`${label}: the hint names the wait`, needle.test(String(waited.hint)));
+    }
+
+    // The counterpart: a real connection timeout must keep its network verdict, or
+    // the fix would have traded one wrong attribution for another.
+    console.log('\n9. a real connection timeout keeps its network verdict');
+    const blackhole = await run({ url: 'http://10.255.255.1/', timeoutMs: 8000 });
+    check('it failed', blackhole.ok === false, `ok=${String(blackhole.ok)}`);
+    check('still classified as possibly unreachable', blackhole.possiblyUnreachable === true,
+      `possiblyUnreachable=${String(blackhole.possiblyUnreachable)}`);
+    check('not classified as a condition timeout', blackhole.conditionTimedOut === undefined,
+      String(blackhole.conditionTimedOut));
+    check('the hint is about the host', /host did not answer/iu.test(String(blackhole.hint)),
+      JSON.stringify(String(blackhole.hint).slice(0, 60)));
   }
 }
 
