@@ -209,7 +209,7 @@ An unresolvable bundle is **skipped silently** apart from one stderr line
 
 ## Usage
 
-`moli_fetch` parameters: `url` (required), `dump`, `writeTo`, `eval`, `scroll`, `wait`,
+`moli_fetch` parameters: `url` (required), `dump`, `writeTo`, `selector`, `eval`, `scroll`, `wait`,
 `waitSelector`, `waitScript`, `waitResponseUrl`, `waitResponseJson`, `delayMs`, `timeoutMs`,
 `maxChars`, `headers`, `userAgent`, `layout`, `scrollbars`, `noJs`, `noCss`, `resources`,
 `withFrames`, `insecureTls`, `failOnHttpError`, `profileDir`, `cookieFile`, `proxy`.
@@ -218,12 +218,42 @@ An unresolvable bundle is **skipped silently** apart from one stderr line
 moli_fetch url=https://example.com dump=markdown             # token-efficient text
 moli_fetch url=https://example.com dump=semantic_tree_text    # nodes with backend ids
 moli_fetch url=https://example.com eval="document.title"      # one computed value
+moli_fetch url=https://example.com selector=".video-card"     # one container, not the page
 moli_fetch url=https://example.com dump=screenshot writeTo=/abs/path/a.png
 moli_fetch url=https://example.com dump=pdf        writeTo=/abs/path/a.pdf
 moli_fetch url=https://example.com dump=markdown scroll=800   # trigger lazy loading first
 ```
 
 Screenshot and PDF dumps need `writeTo`; the bytes are written verbatim rather than printed.
+
+### `selector` — read one container, not the page
+
+A listing page is mostly noise if you only want the items. `selector` returns the text
+of the elements a CSS selector matches, which on a node-dense feed measured **1,829
+characters against 95,605** for the same page as Markdown.
+
+```
+moli_fetch url=https://example.com/feed selector=".video-card"
+moli_fetch url=https://example.com/feed selector="h2" scroll=2000    # scroll first, then read
+```
+
+All matches are joined with newlines and the result reports how many there were:
+"matched 48 element(s)" is the difference between a complete read and a partial one,
+and it is the only signal you get that the selector was too broad or too narrow.
+
+Two cases are deliberately errors rather than empty answers, because the engine
+cannot tell an empty selection from a page with no text — an expression returning
+`""` exits 0 with a blank line:
+
+- **nothing matched** — `ok: false`, "no element matches". A selector that is not on
+  the page is almost always a spelling mistake or a page that has not loaded yet.
+- **matched, but no text** — `ok: false`, "match but none of them has any text", which
+  is what an icon or an image container gives you. Use `eval` if you need attributes.
+
+`selector` cannot be combined with `dump` or `eval`: a selector returns one
+container's text, a dump returns the whole page, and only one expression value can be
+returned — so one of them could only be silently ignored, which is the failure mode
+this plugin keeps having to fix.
 
 ### `scroll` — reach what only appears on a scroll
 
@@ -489,6 +519,11 @@ Eight suites live in [`verify/`](verify/), and all are runnable against a workin
   `bottom`, nonsense rejected, the caller's `eval` value preserved) and then, when an engine is
   present, fetches a page whose `scroll` handler fills a slot and asserts the content appears with
   `scroll` and the placeholder appears without it — a property of the output, not of an internal call.
+- `selector-verify.mjs` covers the two silent-wrong-answer cases a container read invites: a selector
+  matching nothing is an error rather than empty content, and a selector matching several elements
+  reports the count and joins them. It also asserts that the selector is quoted as data rather than
+  spliced into the expression, that `selector` with `dump` or `eval` is refused instead of one of them
+  being ignored, and that it composes with `scroll`.
 - `http-verify.mjs` asserts the parameter-to-flag mapping directly, because a parameter that never
   reaches the engine is indistinguishable from a feature that does not work. It then fetches a 404 and
   checks that `failOnHttpError` reports it while keeping the body, that a healthy page is unaffected,

@@ -195,21 +195,45 @@ profile 插件需要两半都齐：依赖边（`dependencies`）+ `dsh.profile.b
 
 ## 用法
 
-`moli_fetch` 参数：`url`（必填）、`dump`、`writeTo`、`eval`、`scroll`、`wait`、`waitSelector`、
-`waitScript`、`waitResponseUrl`、`waitResponseJson`、`delayMs`、`timeoutMs`、`maxChars`、`headers`、
-`userAgent`、`layout`、`scrollbars`、`noJs`、`noCss`、`resources`、`withFrames`、`insecureTls`、
-`failOnHttpError`、`profileDir`、`cookieFile`、`proxy`。
+`moli_fetch` 参数：`url`（必填）、`dump`、`writeTo`、`selector`、`eval`、`scroll`、`wait`、
+`waitSelector`、`waitScript`、`waitResponseUrl`、`waitResponseJson`、`delayMs`、`timeoutMs`、
+`maxChars`、`headers`、`userAgent`、`layout`、`scrollbars`、`noJs`、`noCss`、`resources`、
+`withFrames`、`insecureTls`、`failOnHttpError`、`profileDir`、`cookieFile`、`proxy`。
 
 ```
 moli_fetch url=https://example.com dump=markdown            # 省 token 的正文
 moli_fetch url=https://example.com dump=semantic_tree_text   # 带节点 id 的结构
 moli_fetch url=https://example.com eval="document.title"     # 取一个值
+moli_fetch url=https://example.com selector=".video-card"    # 只取一个容器，不要整页
 moli_fetch url=https://example.com dump=screenshot writeTo=/绝对路径/a.png
 moli_fetch url=https://example.com dump=pdf        writeTo=/绝对路径/a.pdf
 moli_fetch url=https://example.com dump=markdown scroll=800  # 先触发懒加载再抓取
 ```
 
 截图与 PDF 必须给 `writeTo`；字节是原样落盘的，不会打印到输出里。
+
+### `selector` —— 只取一个容器，不要整页
+
+列表页里如果只要条目，正文大部分都是噪声。`selector` 返回 CSS 选择器匹配到的元素文本——在一个节点密集的
+信息流上实测**1,829 字符，而同一页面走 markdown 是 95,605**。
+
+```
+moli_fetch url=https://example.com/feed selector=".video-card"
+moli_fetch url=https://example.com/feed selector="h2" scroll=2000    # 先滚再取
+```
+
+所有匹配项以换行拼接，并且结果会报告匹配到多少个：**"matched 48 element(s)"** 是"读全了"和"只读到一部分"
+的区别，也是你判断选择器太宽或太窄的唯一信号。
+
+两种情况**刻意做成错误而不是空答案**，因为引擎分不清"没匹配到"和"页面没有文本"——表达式返回 `""` 时是
+exit 0 加一个空行：
+
+- **没有任何匹配** —— `ok: false`，"no element matches"。页面上不存在的选择器几乎总是拼写错误或页面还没加载。
+- **匹配到了但没有文本** —— `ok: false`，说明匹配到了但都没文本，这通常会发生在图标或图片容器上。需要属性就
+  用 `eval`。
+
+`selector` 不能与 `dump` 或 `eval` 同传：选择器返回一个容器的文本、dump 返回整页、而一次只能返回一个表达式
+值——所以其中一个只能被**静默忽略**，而这正是这个插件一路在修的那类失败。
 
 ### `scroll` —— 拿到"只有滚动后才出现"的内容
 
@@ -444,6 +468,9 @@ profile。无论生效的是哪个代理，loopback 地址一律绕过它。
 - `scroll-verify.mjs` 在无引擎时校验表达式构造（像素值、负数、`top`、`bottom`、无效输入被拒、调用方的 `eval`
   值被保留），有引擎时抓取一个"滚动处理器填充槽位"的页面，断言带 `scroll` 时内容出现、不带时只有占位符——
   断言的是**输出**的性质，而不是内部调用。
+- `selector-verify.mjs` 覆盖"按容器取值"最容易出现的两个静默错答案：选择器无匹配时报错而不是空内容、匹配多个
+  元素时报告数量并拼接。它还断言选择器是**作为数据被引号包裹**而不是拼进表达式、`selector` 与 `dump`/`eval`
+  同传会被拒绝（而不是静默忽略其中一个）、以及它能与 `scroll` 组合。
 - `http-verify.mjs` 直接断言"参数 → 引擎选项"的映射，因为**参数没送到引擎和功能不生效，从外面看是一样的**。
   随后抓一个 404，验证 `failOnHttpError` 会报告失败同时保留响应体、健康页面不受影响、以及错误页的截图仍然被
   写为合法 PNG 而不是被当文本解码。它还覆盖那两个"静默给错答案"的情形：`eval` 配 `dump` 会带

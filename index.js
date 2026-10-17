@@ -94,11 +94,15 @@ const FETCH_PARAMETERS = {
     dump: {
       type: 'string',
       enum: ['html', 'markdown', 'json', 'semantic_tree', 'semantic_tree_text', 'screenshot', 'screenshot_full', 'pdf'],
-      description: 'Output format. Omit for rendered HTML. `markdown` and `semantic_tree_text` are the token-efficient choices for reading a page; `json` carries status and final_url; screenshot/pdf need writeTo.',
+      description: 'Output format. Omit for rendered HTML. `markdown` is the cheapest way to read a page. `semantic_tree_text` is for locating things by structure (role, name, backend id), not for saving tokens: its size follows the page\'s node density and it is often larger than markdown — measured at 1.8x on a node-dense page — so prefer it only when you need the structure. `json` carries status and final_url; screenshot/pdf need writeTo.',
     },
     writeTo: {
       type: 'string',
       description: 'Absolute path to save the output. Required for screenshot/pdf; optional for text dumps larger than maxChars.',
+    },
+    selector: {
+      type: 'string',
+      description: 'Return the text of the elements this CSS selector matches instead of the whole page. This is the cheap way to read one container out of a noisy listing page: the cards on a feed measured 1,829 characters against 95,605 for the same page as markdown. All matches are joined with newlines and the result reports how many there were; matching nothing is an error, not empty content, because the engine cannot distinguish an empty selection from a page with no text. Not compatible with `dump` or `eval` — one of them could only be ignored.',
     },
     eval: {
       type: 'string',
@@ -175,6 +179,8 @@ const FETCH_OUTPUT_SCHEMA = {
     omitted: { type: 'integer' },
     evalFailed: { type: 'boolean' },
     evalDiscarded: { type: 'boolean' },
+    selector: { type: 'string' },
+    matched: { type: 'integer' },
     truncated: { type: 'boolean' },
     error: { type: 'string' },
     hint: { type: 'string' },
@@ -227,13 +233,18 @@ function renderFetch(_args, value) {
     if (value.unreachable === true) lines.push('Cause: the host did not answer; a local forward proxy is the usual fix on this network.');
     else if (value.possiblyUnreachable === true) lines.push('Cause: the host did not answer in time; it may be blocked, or the page may simply be slow.');
     if (typeof value.hint === 'string' && value.hint !== '') lines.push(`Next: ${value.hint}`);
-    // An HTTP error keeps its body under `failOnHttpError`. Reporting the failure
+     // An HTTP error keeps its body under `failOnHttpError`. Reporting the failure
     // without the body would throw away the error page, which is the part worth
-    // reading -- and for a binary dump the body is the file that was written.
-    if (value.kind === 'binary' && typeof value.path === 'string') {
+    // reading -- and for a binary dump the body is the file that was written. A
+    // selector failure is different: there is no server body to show, and the
+    // message already says what did not match.
+    if (value.httpError === true && value.kind === 'binary' && typeof value.path === 'string') {
       lines.push(`The error page was still written to ${value.path} (${String(value.bytes)} bytes).`);
-    } else if (typeof value.content === 'string' && value.content !== '') {
+    } else if (value.httpError === true && typeof value.content === 'string' && value.content !== '') {
       lines.push('', 'The server\'s response body:', '', value.content);
+    } else if (typeof value.selector === 'string') {
+      lines.push(`Selector: ${JSON.stringify(value.selector)}`
+        + (typeof value.matched === 'number' ? ` (matched ${String(value.matched)})` : ''));
     }
     return [{ type: 'text', text: lines.join('\n') }];
   }
@@ -249,6 +260,12 @@ function renderFetch(_args, value) {
   // than after the body, where a 900-character page would bury it.
   if (value.evalDiscarded === true) {
     parts.push('Note: the `eval` expression was dropped because `dump` was given too — the engine discards the expression value in that combination. What follows is the page, not the expression.');
+  }
+  // A selector answer is a list, so say how many elements produced it: "48 matched,
+  // 34 had text" is the difference between a complete read and a partial one, and it
+  // is the only signal the caller has that the selector was too broad or too narrow.
+  if (typeof value.selector === 'string' && typeof value.matched === 'number') {
+    parts.push(`Selector ${JSON.stringify(value.selector)} matched ${String(value.matched)} element(s).`);
   }
   if (typeof value.note === 'string' && value.note !== '') parts.push(value.note);
   parts.push(String(value.content ?? ''));

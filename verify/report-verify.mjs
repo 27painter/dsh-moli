@@ -155,10 +155,15 @@ console.log('\n5. truncation keeps the tail as well as the head');
 const long = await fetchTool.execute({ url: 'https://bbs.nga.cn/thread.php?key=test', maxChars: 300, timeoutMs: 45000 }, {});
 if (long.ok === true && long.truncated === true) {
   check('omitted count reported', typeof long.omitted === 'number' && long.omitted > 0, `omitted=${String(long.omitted)}`);
-  const at = String(long.content).indexOf('characters omitted here');
+  const at = String(long.content).indexOf('characters omitted');
   check('marker present', at > 0);
   check('marker is between head and tail', at > 0 && at < String(long.content).length - 20, `at ${String(at)}`);
+  // The marker is a position signal only; the actionable detail lives in the note.
+  // Both used to repeat each other, and the duplication cost 12.6% of a 2,000-char
+  // budget, so the marker no longer mentions writeTo at all.
+  check('marker does not repeat the note', !/writeTo/u.test(String(long.content)));
   check('note describes head and tail', /first .* and the last /u.test(String(long.note)));
+  check('note carries the writeTo escape', /writeTo/u.test(String(long.note)));
 } else {
   check('reached a page long enough to truncate', false,
     `ok=${String(long.ok)} truncated=${String(long.truncated)} chars=${String(long.chars)}`);
@@ -169,7 +174,7 @@ const short = await fetchTool.execute({ url: 'https://example.com/', dump: 'mark
 if (short.ok === true) {
   check('not truncated', short.truncated === false, `chars=${String(short.chars)}`);
   check('no omitted field', short.omitted === undefined);
-  check('no marker in content', !/characters omitted here/u.test(String(short.content)));
+  check('no marker in content', !/characters omitted/u.test(String(short.content)));
 } else {
   check('short page fetched', false, JSON.stringify(String(short.error ?? '').slice(0, 70)));
 }

@@ -88,6 +88,12 @@ jobs:
       - name: scroll-verify (the scroll parameter and what it triggers)
         run: node verify/scroll-verify.mjs
 
+      # Same shape: the builder half is offline, the page half uses a data: URL and
+      # skips without an engine. Covers the two silent-wrong-answer cases the review
+      # named -- a selector matching nothing, and one matching several elements.
+      - name: selector-verify (reading one container instead of the page)
+        run: node verify/selector-verify.mjs
+
       # Half of this asserts the parameter-to-flag mapping, which needs nothing but
       # Node. The other half needs a real 404, and skips when the runner has no
       # network rather than failing, so flaky egress never reddens the build.
