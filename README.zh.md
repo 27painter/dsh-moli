@@ -521,43 +521,6 @@ Chromium 后端、原始 CDP 逃生舱、按调用的 CDP 端点、持久化浏�
 关于这两个版本本身：npm 只允许在很短的时间窗口内撤回发布，且无法单独撤回某一个版本，因此 1.1.11 与
 1.1.12 仍然可安装，但已被标记为废弃并指向这里。`npm install dsh-moli` 会安装到 1.1.13。
 
-## 发布
-
-发布走 GitHub Actions 的 OIDC 身份，**本机不存任何 npm token，因此没有会失效的凭据**：
-
-```bash
-npm version patch          # 或 minor / major
-git push && git tag v1.1.6 && git push origin v1.1.6
-```
-
-`.github/workflows/publish.yml` 会先校验 tag 与 `package.json` 版本一致、跑离线测试套件，然后发布。
-npmjs.com 上需要一次性配置：**package → Settings → Trusted Publisher → GitHub Actions**，用户
-`27painter`、仓库 `dsh-moli`、workflow 文件名 `publish.yml`，并允许 `npm publish` 动作。
-
-**不要再用本机存储的 token 发布。** 这台机器原先配的是一个绕过 2FA 的 classic token，npm 正在淘汰这类
-token；它被吊销后，发布会报：
-
-```
-E404 Not Found - PUT https://registry.npmjs.org/dsh-moli
-     The requested resource 'dsh-moli@1.1.5' could not be found or you do not have permission
-```
-
-**这看起来像"包不存在"，实际是认证失败。** 任何本地发布之前先跑
-`node scripts/preflight-publish.mjs`：它会告诉你凭据能否认证，不能时明确点出这个误导性的 404。
-
-### 废弃某个版本：去网站操作，别用命令行
-
-发布是脚本化的，**废弃则刻意不做成脚本**。用 npmjs.com 上的包页面——**package → Settings →
-Deprecate**——选版本、写理由。
-
-`npm deprecate dsh-moli@1.1.11 "…"` 在本机凭据失效时会给出上面那个同样误导的失败，而且这里还有第二个
-理由不要依赖 token：npm 在 **2026 年 7 月 31 日**起禁止 2FA-bypass 类型的 granular token 执行**包管理**
-操作，也就是说"以前能让 `deprecate` 脚本化"的那类凭据正在被取消；而 `publish` 有受支持的、免 token 的
-OIDC 路径。**一个只在"偶尔废弃版本"时才需要 token 的流程，注定在下次需要它时是坏的**——1.1.11 与 1.1.12
-遇到的正是这种情况。
-
-1.0.0 与 1.0.1 的废弃就是通过网站完成的。
-
 ## 许可
 
 MIT，见 [LICENSE](LICENSE)。

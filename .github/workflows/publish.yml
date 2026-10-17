@@ -2,13 +2,14 @@ name: publish
 
 # Publishes to npm through GitHub's OIDC identity -- no npm token anywhere.
 #
-# Why this replaces `npm publish` from a laptop: the machine's npm credential was
-# a classic token that bypasses 2FA, and npm is retiring those ("npm tokens that
-# bypass 2FA are being restricted for account changes and direct publishing").
-# When such a token is revoked, npm answers a publish attempt with HTTP 404
-# ("the requested resource could not be found or you do not have permission"),
-# which reads as a missing package rather than a dead credential. Publishing
-# through OIDC removes the credential entirely, so there is nothing to expire.
+# **Manual only, on purpose.** This used to fire on every `v*` tag, which meant
+# pushing a tag published a release whether or not that was intended. The maintainer
+# publishes from a local `npm publish` instead, so the tag is now just a marker of
+# what shipped and this workflow runs only when dispatched by hand.
+#
+# Why keep it at all: it is the fallback for the day the local npm credential is
+# dead. OIDC needs no token, so it keeps working when a stored one has expired --
+# which is exactly the failure this project hit twice.
 #
 # One-time setup on npmjs.com: package -> Settings -> Trusted Publisher ->
 # GitHub Actions, with
@@ -18,13 +19,11 @@ name: publish
 #     Environment          : (leave empty)
 # and allow the `npm publish` action.
 #
-# Release with: bump the version, commit, then tag and push:
-#     git tag v1.1.6 && git push origin v1.1.6
+# The tag and package.json must agree, or the published version is a lie, so the
+# version check below still runs. Note that a local `npm publish` produces no
+# provenance; only this workflow does.
 
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
 
 permissions:

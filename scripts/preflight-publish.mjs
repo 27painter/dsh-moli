@@ -1,69 +1,112 @@
-// Preflight before `npm publish`: report whether this machine can actually
-// publish, instead of letting npm answer with a 404 that reads like a missing
-// package.
+// Check whether this machine can actually `npm publish` before you try.
 //
-//   node scripts/preflight-publish.mjs [registry]
+//   node scripts/preflight-publish.mjs
 //
-// Exit 0 = safe to publish. Exit 1 = the credential is dead or read-only; the
-// message says which, and what to do about it.
+// Exit 0 = the credential authenticates and this package can be published.
+// Exit 1 = it cannot, and the message says which failure it is.
 //
-// Why this exists: npm masks an authorisation failure on PUT with
-//   E404 ... 'dsh-moli@1.1.5' could not be found or you do not have permission
-// which sends you looking for a package problem that is not there. The token was
-// simply expired. `npm whoami` catches that, but only if it is run with the same
-// registry the publish targets, and only if a stale token in a config file is not
-// shadowing it.
-import { spawnSync } from 'node:child_process';
+// Why this exists: npm answers an authorisation failure on PUT with
+//
+//   E404 Not Found - PUT https://registry.npmjs.org/dsh-moli
+//        The requested resource 'dsh-moli@1.1.17' could not be found or you do
+//        not have permission to access it.
+//
+// which reads as a missing package and sends you looking for a packaging problem
+// that is not there. The real causes are a dead token, a token without write
+// access, or a version that is already published. This tells them apart in one
+// command, and it needs no network round trip once the local config is read.
+//
+// Publishing manually is the intended path for this package; the OIDC workflow in
+// .github/workflows/publish.yml is the fallback for when a local credential is gone.
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const registry = (process.argv[2] ?? 'https://registry.npmjs.org').replace(/\/+$/u, '');
+const here = dirname(fileURLToPath(import.meta.url));
+const root = dirname(here);
+const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 
-/** Tokens are never printed; only their shape. */
-function storedToken() {
-  const file = join(process.env.USERPROFILE ?? process.env.HOME ?? '', '.npmrc');
-  if (!existsSync(file)) return undefined;
-  const line = readFileSync(file, 'utf8').split('\n').map(l => l.trim())
-    .find(l => /_authToken\s*=/u.test(l) && l.includes(registry.replace(/^https?:/u, '')));
-  if (line === undefined) return undefined;
-  return line.slice(line.indexOf('=') + 1).trim();
+let failed = false;
+const check = (label, ok, detail) => {
+  console.log(`${ok ? 'PASS' : 'FAIL'} ${label}${detail ? ' -- ' + detail : ''}`);
+  if (!ok) failed = true;
+};
+
+// npm lives beside the running node binary; spawning a bare `npm.cmd` fails at
+// Node 20+ with EINVAL, which is why this goes through the CLI script.
+function npm(args, timeout = 60000) {
+  const cli = join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js');
+  const command = existsSync(cli) ? [process.execPath, [cli, ...args]] : ['npm', args];
+  try {
+    const out = execFileSync(command[0], command[1], { encoding: 'utf8', timeout, stdio: ['ignore', 'pipe', 'pipe'] });
+    return { ok: true, out: String(out).trim(), err: '' };
+  } catch (error) {
+    return { ok: false, out: String(error.stdout ?? '').trim(), err: String(error.stderr ?? error.message) };
+  }
 }
 
-function whoami() {
-  const r = spawnSync(process.platform === 'win32' ? 'npm.cmd' : 'npm',
-    ['whoami', '--registry', registry],
-    { encoding: 'utf8', timeout: 60000, windowsHide: true, shell: process.platform === 'win32' });
-  const out = String(r.stdout ?? '').trim();
-  const err = String(r.stderr ?? '').trim();
-  return { status: r.status, out, err: err.split('\n').slice(0, 4).join(' | ') };
-}
+console.log(`package : ${pkg.name}@${pkg.version}`);
+console.log(`registry: ${String(pkg.publishConfig?.registry ?? '(default)')}\n`);
 
-console.log(`registry : ${registry}`);
-
-const token = storedToken();
-if (token === undefined) {
-  console.log('token    : none stored for this registry (expected when publishing through OIDC in CI)');
+// 1. The tarball that would be uploaded. No credential needed, so this runs first.
+const pack = npm(['pack', '--dry-run', '--json'], 120000);
+if (pack.ok) {
+  const files = JSON.parse(pack.out)[0]?.files?.length ?? 0;
+  check('the package builds and lists its files', files > 0, `${String(files)} files`);
 } else {
-  console.log(`token    : ${String(token.length)} chars, prefix ${token.slice(0, 8)}…`);
+  check('the package builds', false, pack.err.split('\n')[0]);
 }
 
-const me = whoami();
-if (me.status === 0 && me.out !== '') {
-  console.log(`whoami   : ${me.out}`);
-  console.log('\nOK: this machine can authenticate. `npm publish` should be accepted.');
-  process.exit(0);
+// 2. The credential. `whoami` is the one call that separates "no auth" from
+//    "wrong package", because it fails for auth reasons only.
+const who = npm(['whoami'], 45000);
+if (who.ok && who.out !== '') {
+  check('the npm credential authenticates', true, who.out);
+} else if (/E401|ENEEDAUTH|Unauthorized|unauthorized/iu.test(who.err)) {
+  check('the npm credential authenticates', false,
+    'E401 -- there is no usable token. Run `npm login`, or set a granular access token '
+    + '(read-write, this package) in your user .npmrc. A publish attempt would have reported E404 instead.');
+} else {
+  check('the npm credential authenticates', false, who.err.split('\n')[0]);
 }
 
-console.log('whoami   : FAILED');
-if (me.err !== '') console.log(`           ${me.err.slice(0, 200)}`);
+// 3. Whether that version is already taken. A published version cannot be
+//    overwritten, and npm reports the refusal in the same 404 shape.
+//
+// Read from the registry over HTTPS rather than `npm view`: that command goes
+// through the configured credential, so with a dead token it fails for auth
+// reasons and this check would blame the version instead. Version metadata is
+// public, so the authenticated path buys nothing here.
+const registry = String(pkg.publishConfig?.registry ?? 'https://registry.npmjs.org').replace(/\/$/u, '');
+try {
+  const response = await fetch(`${registry}/${encodeURIComponent(pkg.name)}/${encodeURIComponent(pkg.version)}`, {
+    headers: { accept: 'application/json' },
+    signal: AbortSignal.timeout(20000),
+  });
+  // Drain the body so the socket is released.
+  await response.text();
+  if (response.status === 200) {
+    check('the version is still free', false, `${pkg.version} is already published; bump package.json first`);
+  } else if (response.status === 404) {
+    check('the version is still free', true, `${pkg.version} is not on the registry`);
+  } else {
+    check('the version is still free', false, `the registry answered HTTP ${String(response.status)}`);
+  }
+} catch (error) {
+  check('the version is still free', false, `could not reach the registry: ${String(error.message).split('\n')[0]}`);
+}
 
-console.log('\nThis machine cannot publish. npm will answer the PUT with E404 and a');
-console.log('"could not be found or you do not have permission" message, which is an');
-console.log('authorisation failure wearing the wrong error code. Fix one of:\n');
-console.log('  a) publish from CI instead (no credential to expire) -- see');
-console.log('     .github/workflows/publish.yml and configure the trusted publisher on npmjs.com');
-console.log('  b) create a new token on npmjs.com and store it:');
-console.log(`       npm config set "${registry.replace(/^https?:/u, '')}/:_authToken" <token>`);
-console.log('\nNote that npm is retiring tokens which bypass 2FA, so a classic token may be');
-console.log('revoked again; the OIDC path in (a) does not use one.');
-process.exit(1);
+console.log('');
+if (failed) {
+  console.log('Not safe to publish yet. Fix the FAILs above.');
+  console.log('If the credential is the problem, the OIDC workflow is the fallback that needs none:');
+  console.log('  Actions -> publish -> Run workflow');
+  // `process.exitCode` rather than `process.exit()`: exiting from inside an async
+  // body while a fetch socket is still open trips a libuv assertion on Windows
+  // (`!(handle->flags & UV_HANDLE_CLOSING)`), which crashed this script with a
+  // stack trace instead of printing its own verdict.
+  process.exitCode = 1;
+} else {
+  console.log(`Safe to publish. From this directory:\n\n  npm publish\n\nThen tag the release:\n\n  git tag v${pkg.version} && git push origin v${pkg.version}`);
+}

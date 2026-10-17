@@ -577,47 +577,6 @@ On the versions themselves: npm allows a version to be unpublished only briefly 
 individually, so 1.1.11 and 1.1.12 remain installable but are marked deprecated and point here.
 `npm install dsh-moli` resolves to 1.1.13.
 
-## Releasing
-
-Publishing goes through GitHub Actions' OIDC identity, so **no npm token exists to expire**:
-
-```bash
-npm version patch          # or minor / major
-git push && git tag v1.1.6 && git push origin v1.1.6
-```
-
-`.github/workflows/publish.yml` checks that the tag matches `package.json`, runs the offline suites,
-and publishes. One-time setup on npmjs.com: **package → Settings → Trusted Publisher → GitHub
-Actions**, with user `27painter`, repository `dsh-moli`, workflow filename `publish.yml`, and the
-`npm publish` action allowed.
-
-**Do not publish with a stored token.** This machine was configured with a classic token that bypasses
-2FA, and npm is retiring those; when it was revoked, the publish failed with
-
-```
-E404 Not Found - PUT https://registry.npmjs.org/dsh-moli
-     The requested resource 'dsh-moli@1.1.5' could not be found or you do not have permission
-```
-
-which reads as a missing package and is actually an authorisation failure. Run
-`node scripts/preflight-publish.mjs` before any local publish: it reports whether the credential can
-authenticate and names that misleading 404 when it cannot.
-
-### Deprecating a version: do it on the website
-
-Publishing is scripted; deprecating deliberately is not. Use the package's page on npmjs.com —
-**package → Settings → Deprecate** — and name the versions and the reason.
-
-`npm deprecate dsh-moli@1.1.11 "…"` produces the same misleading failure as above when the local
-credential is dead, and there is a second reason not to reach for a token here. npm restricted
-2FA-bypass granular tokens from package-management operations on 31 July 2026, so the kind of token
-that used to make `deprecate` scriptable is being withdrawn, while `publish` has a supported
-token-free path through OIDC. A release process that needs a token only for the rare act of
-deprecating is a process that will be broken the next time it is needed, which is exactly what
-happened with 1.1.11 and 1.1.12.
-
-The 1.0.0 and 1.0.1 deprecations were done this way, from the website.
-
 ## License
 
 MIT. See [LICENSE](LICENSE).
