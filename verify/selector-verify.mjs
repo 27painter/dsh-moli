@@ -4,9 +4,14 @@
 // wrong silently: a selector that matches nothing must not come back as empty
 // content, and multiple matches need defined behaviour. Both are asserted against a
 // data: URL so the shape of the page is the test's, not a website's.
-import { pathToFileURL } from 'node:url';
+import { dirname, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const REPO = 'D:/27painter/Documents/dsh-moli-src';
+// Derive the repo root from this file's location. A hard-coded absolute path works
+// on the machine that wrote it and fails everywhere else -- which is exactly what
+// happened: this suite passed locally and broke all three CI runners with a path
+// that began with a Windows drive letter on Linux.
+const REPO = dirname(dirname(fileURLToPath(import.meta.url)));
 
 let pass = 0;
 let fail = 0;
