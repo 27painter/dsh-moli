@@ -174,6 +174,7 @@ const FETCH_OUTPUT_SCHEMA = {
     empty: { type: 'boolean' },
     omitted: { type: 'integer' },
     evalFailed: { type: 'boolean' },
+    evalDiscarded: { type: 'boolean' },
     truncated: { type: 'boolean' },
     error: { type: 'string' },
     hint: { type: 'string' },
@@ -243,6 +244,12 @@ function renderFetch(_args, value) {
     }];
   }
   const parts = [];
+  // A discarded `eval` value is the one case where the output looks like a clean
+  // answer to a question that was never answered, so the warning goes first rather
+  // than after the body, where a 900-character page would bury it.
+  if (value.evalDiscarded === true) {
+    parts.push('Note: the `eval` expression was dropped because `dump` was given too — the engine discards the expression value in that combination. What follows is the page, not the expression.');
+  }
   if (typeof value.note === 'string' && value.note !== '') parts.push(value.note);
   parts.push(String(value.content ?? ''));
   return [{ type: 'text', text: parts.join('\n\n') }];

@@ -242,8 +242,29 @@ Measured on a page whose `scroll` handler fills a slot: without `scroll` the dum
 `STILL-EMPTY`, with `scroll=1000` it says `LAZY-CONTENT-1000`. It also moves the screenshot, so a
 scrolled `dump=screenshot` shows that part of the page.
 
-It runs as part of the engine's own pre-capture evaluation and therefore composes with `eval`: the
-scroll happens first, and the expression still returns its own value.
+`scroll` is a side effect, so it composes and stands alone:
+
+```
+moli_fetch url=... dump=markdown scroll=600      # scroll, then dump the page
+moli_fetch url=... eval="document.title" scroll=600   # scroll, then read a value
+moli_fetch url=... scroll=600                    # just scroll; you still get the page
+```
+
+The last form is worth spelling out because it was broken. The scroll runs in the engine's own
+pre-capture evaluation, and without `dump` the engine prints whatever that evaluation returns — so an
+earlier version that returned the scroll position made this call answer `600` instead of the document,
+while the identical call without `scroll` returned 1,989 characters of HTML. A scroll reports nothing
+now; it only happens.
+
+### `eval` with `dump` — the expression value is dropped
+
+The engine documents this and it is kept, because using an expression to change a page before
+capturing it is a real pattern. What is not acceptable is that it used to look like a clean answer:
+`eval='JSON.stringify({probe:1})'` with `dump=markdown` returned 900 characters of Markdown, reported
+`ok: true`, and said nothing. The result now carries `evalDiscarded: true` and a note, and the rendered
+output leads with the warning rather than burying it under the body.
+
+If you want the expression's value, pass `eval` without `dump`.
 
 ### `failOnHttpError` — stop reading an error page as content
 
@@ -472,6 +493,8 @@ Eight suites live in [`verify/`](verify/), and all are runnable against a workin
   reaches the engine is indistinguishable from a feature that does not work. It then fetches a 404 and
   checks that `failOnHttpError` reports it while keeping the body, that a healthy page is unaffected,
   and that a screenshot of an error page is still written as a valid PNG rather than decoded as text.
+  It also covers the two silent-answer cases: `eval` with `dump` is flagged `evalDiscarded` and the
+  warning renders first, and `scroll` alone returns the document rather than the scroll offset.
   The end-to-end half needs an HTTP error from a real server: loopback is unreachable from inside this
   sandbox — `curl.exe` times out on `127.0.0.1` while the Node host reaches it — so it uses a path
   under `example.com` and skips when the network is away.

@@ -58,6 +58,7 @@ check('the waits are strings', ['waitResponseUrl', 'waitResponseJson', 'waitScri
   .every(k => tool.parameters.properties[k]?.type === 'string'));
 check('none is required', (tool.parameters.required ?? []).length === 1 && tool.parameters.required[0] === 'url');
 check('the output schema declares httpError', tool.output.schema.properties.httpError?.type === 'boolean');
+check('the output schema declares evalDiscarded', tool.output.schema.properties.evalDiscarded?.type === 'boolean');
 
 // ---------------------------------------------------------------------------
 console.log('\n4. end to end: an HTTP error is reported and its body kept');
@@ -105,6 +106,36 @@ if (exe === undefined) {
     }
     check('the status is still named', bin.status === 404, `status=${String(bin.status)}`);
     check('the hint points at the file', /was written to/u.test(String(bin.hint)), JSON.stringify(String(bin.hint).slice(0, 70)));
+
+    // `eval` together with `dump` discards the expression value. That is the engine's
+    // documented behaviour and stays, because mutating a page before capturing it is
+    // a real use -- but the result used to look like a clean answer to a question
+    // that was never answered, so it now says what happened.
+    console.log('\n6. eval + dump says the expression value was dropped');
+    const ed = await run({ url: 'https://example.com/', dump: 'markdown', eval: 'JSON.stringify({probe:1})' });
+    check('still succeeds', ed.ok === true, String(ed.error ?? ''));
+    check('flagged as a discarded expression', ed.evalDiscarded === true, String(ed.evalDiscarded));
+    check('the note explains it', /discards the expression result/u.test(String(ed.note)),
+      JSON.stringify(String(ed.note).slice(0, 70)));
+    const rendered = String(tool.output.render({}, ed).text ?? tool.output.render({}, ed)[0].text);
+    check('the warning is rendered first, where the body cannot bury it',
+      rendered.startsWith('Note: the `eval` expression was dropped'),
+      JSON.stringify(rendered.slice(0, 70)));
+
+    const evalOnly = await run({ url: 'https://example.com/', eval: 'document.title' });
+    check('eval alone returns its value', String(evalOnly.content).trim() === 'Example Domain',
+      JSON.stringify(String(evalOnly.content).trim()));
+    check('and is not flagged', evalOnly.evalDiscarded === undefined, String(evalOnly.evalDiscarded));
+
+    // `scroll` alone must not replace the page with the scroll position. This is the
+    // end-to-end half of the same guarantee scroll-verify asserts on combineEval.
+    console.log('\n7. scroll alone still returns the page');
+    const scrolled = await run({ url: 'https://example.com/', scroll: '600' });
+    check('it succeeded', scrolled.ok === true, String(scrolled.error ?? ''));
+    check('and returned the document, not a number', /Example Domain|<html/iu.test(String(scrolled.content)),
+      JSON.stringify(String(scrolled.content).slice(0, 60)));
+    check('the content is bigger than a scroll offset', String(scrolled.content).length > 100,
+      `${String(String(scrolled.content).length)} chars`);
   }
 }
 

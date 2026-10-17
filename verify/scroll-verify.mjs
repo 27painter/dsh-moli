@@ -29,8 +29,17 @@ check('"top" resolves to zero', /scrollTo\(0, 0\)/u.test(String(scrollScript('to
 check('no scroll yields no script', scrollScript(undefined) === undefined);
 check('an empty string yields no script', scrollScript('') === undefined);
 check('nonsense yields no script rather than breaking the fetch', scrollScript('sideways') === undefined);
-check('scroll alone becomes the expression', /scrollTo/u.test(String(combineEval(undefined, '400'))));
-check('an eval alone is passed through untouched', combineEval('document.title', undefined) === 'document.title');
+// `scroll` alone must NOT become the expression. The engine prints what `--eval`
+// evaluates to, so passing it there replaced the page with the scroll position:
+// `moli_fetch url=... scroll=600` answered `600`, while the identical call without
+// `scroll` returned the document. Returning undefined leaves the default output.
+check('scroll alone does not become the expression', combineEval(undefined, '400') === undefined,
+  JSON.stringify(String(combineEval(undefined, '400'))));
+// With a dump the expression exists only for its side effect, so the scroll still
+// has to be passed or the scroll never happens. Getting this wrong silently broke
+// lazy loading while the scroll-alone fix looked correct.
+check('scroll with a dump is still passed, for its side effect',
+  /scrollTo/u.test(String(combineEval(undefined, '400', true))));check('an eval alone is passed through untouched', combineEval('document.title', undefined) === 'document.title');
 const both = String(combineEval('document.title', '400'));
 check('scroll runs before the caller\'s expression', both.indexOf('scrollTo') < both.indexOf('document.title'),
   both.slice(0, 70));
