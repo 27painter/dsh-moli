@@ -21,12 +21,15 @@ DSH already covers it with `web_fetch`. It is not enough for anything a browser 
 - **Pictures** — a screenshot to see what a page looks like, or a PDF to keep.
 - **One value from deep inside a page** — a price, a count, a title, read with a selector instead of
   pulling the whole document.
+- **A list you can read for 7% of the page** — `selector` returns only the matched containers, which
+  on a real feed measured 1,779 characters against 139,338 for the same page as Markdown. If you are
+  about to fetch a listing page and skim it, read the `selector` section under Usage first.
 
 For those jobs this plugin gives the agent two tools:
 
 | Tool | What it does |
 |---|---|
-| `moli_fetch` | Renders a URL and returns Markdown, HTML, a semantic tree, or a JSON envelope carrying the HTTP status; evaluates a JavaScript expression; writes a PNG screenshot or a PDF |
+| `moli_fetch` | Renders a URL and returns Markdown, HTML, a semantic tree, or a JSON envelope carrying the HTTP status; **reads one container with `selector`**; evaluates a JavaScript expression; writes a PNG screenshot or a PDF |
 | `moli_probe` | Reports whether the engine is installed, which version, and whether HTTPS works — and installs Moli when it is missing |
 
 The practical question is whether the agent needs the page as a **browser** would see it. If a plain
@@ -227,16 +230,33 @@ moli_fetch url=https://example.com dump=markdown scroll=800   # trigger lazy loa
 
 Screenshot and PDF dumps need `writeTo`; the bytes are written verbatim rather than printed.
 
-### `selector` — read one container, not the page
+### `selector` — pay for the items, not the page
 
-A listing page is mostly noise if you only want the items. `selector` returns the text
-of the elements a CSS selector matches, which on a node-dense feed measured **1,829
-characters against 95,605** for the same page as Markdown.
+**This is the cheapest way to read a page with this plugin, and usually the one you want.**
+
+A listing page is mostly noise if you only want the items. `selector` returns the text of
+the elements a CSS selector matches, so you pay for the part you asked for instead of for
+the whole document. Measured on the same page, same moment:
+
+| Call | Result |
+|---|---|
+| `dump=markdown` | 139,338 characters |
+| `selector=".bili-video-card"` | 1,779 characters, 47 matches |
+
+**78x less to read** — and the difference is not just cost. The full page arrives with
+navigation, footers, cookie banners and recommendation rails; the selector result is the
+47 rows you asked for, with nothing to sift out afterwards.
 
 ```
 moli_fetch url=https://example.com/feed selector=".video-card"
 moli_fetch url=https://example.com/feed selector="h2" scroll=2000    # scroll first, then read
+moli_fetch url="https://www.bing.com/search?q=deepseek+harness" selector=".b_algo"
 ```
+
+That last one is worth pointing out: **a search engine's results page is just a page**, so
+one fetch plus one selector reads it, with no search API and no per-query cost. It is also
+why the plugin still exposes only `fetch` — searching is a selector call, not a separate
+tool. Engines block clients at different rates, so if one refuses the request, try another.
 
 All matches are joined with newlines and the result reports how many there were:
 "matched 48 element(s)" is the difference between a complete read and a partial one,

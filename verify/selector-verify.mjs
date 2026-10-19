@@ -30,6 +30,12 @@ check('a selector with quotes cannot break out', String(selectorScript('a[x="1"]
 check('queries all matches, not the first', /querySelectorAll/u.test(script));
 check('carries a sentinel so an empty answer is distinguishable', script.includes('[dsh-moli:selector]'));
 check('reports the match count', /matched:/u.test(script));
+// `innerText ?? textContent` is not enough: `??` treats '' as a value. Measured on
+// Bing, ten matched elements had an innerText of '' and 150-240 characters of
+// textContent, and the selector reported "matched 10 but none has any text".
+check('falls back to textContent when innerText is EMPTY, not only when absent',
+  /inner !== ''/u.test(script) && /textContent/u.test(script), script.slice(0, 60));
+check('the bare nullish fallback is gone', !/innerText \?\? node\.textContent/u.test(script));
 check('no selector yields no script', selectorScript(undefined) === undefined);
 check('an empty selector yields no script', selectorScript('   ') === undefined);
 

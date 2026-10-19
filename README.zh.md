@@ -19,12 +19,14 @@
 - **登录与同意墙**——必须先有会话或 cookie 才肯显示内容的页面。
 - **图**——想看一眼页面长什么样（截图），或想存档（PDF）。
 - **页面深处的一个值**——价格、计数、标题，用选择器直接取，而不是把整篇文档拉回来。
+- **只用 7% 的篇幅读完一个列表**——`selector` 只返回匹配到的容器，实测在一个真实信息流上是 **1,779 字符，
+  而同一页面走 markdown 是 139,338**。如果你正准备抓一个列表页再自己筛，先看 Usage 里的 `selector` 一节。
 
 针对这些场景，本插件给 agent 两个工具：
 
 | 工具 | 作用 |
 |---|---|
-| `moli_fetch` | 渲染 URL 并返回 Markdown / HTML / 语义树 / 带 HTTP 状态的 JSON；执行 JS 表达式取值；写出 PNG 截图或 PDF |
+| `moli_fetch` | 渲染 URL 并返回 Markdown / HTML / 语义树 / 带 HTTP 状态的 JSON；**用 `selector` 只取一个容器**；执行 JS 表达式取值；写出 PNG 截图或 PDF |
 | `moli_probe` | 报告引擎是否安装、什么版本、HTTPS 是否可用；没装时还能替你装上 |
 
 判断标准很简单：**agent 需要的是"浏览器眼里的页面"吗？** 如果普通抓取已经能拿到你要的文字，`web_fetch`
@@ -216,15 +218,30 @@ moli_fetch url=https://example.com dump=markdown scroll=800  # 先触发懒加�
 
 截图与 PDF 必须给 `writeTo`；字节是原样落盘的，不会打印到输出里。
 
-### `selector` —— 只取一个容器，不要整页
+### `selector` —— 只买条目，不买整页
 
-列表页里如果只要条目，正文大部分都是噪声。`selector` 返回 CSS 选择器匹配到的元素文本——在一个节点密集的
-信息流上实测**1,829 字符，而同一页面走 markdown 是 95,605**。
+**这是本插件读取页面最便宜的方式，通常也是你真正想要的那个。**
+
+列表页里如果只要条目，正文大部分都是噪声。`selector` 返回 CSS 选择器匹配到的元素文本，所以你只为**你要的
+那部分**付费，而不是为整篇文档。同一页面、同一时刻实测：
+
+| 调用 | 结果 |
+|---|---|
+| `dump=markdown` | 139,338 字符 |
+| `selector=".bili-video-card"` | 1,779 字符，匹配 47 个 |
+
+**少读 78 倍**——而且省的不只是成本。整页拿回来会带着导航、页脚、cookie 横幅和推荐流；选择器的结果就是你
+要的那 47 行，之后不用再筛。
 
 ```
 moli_fetch url=https://example.com/feed selector=".video-card"
 moli_fetch url=https://example.com/feed selector="h2" scroll=2000    # 先滚再取
+moli_fetch url="https://www.bing.com/search?q=deepseek+harness" selector=".b_algo"
 ```
+
+最后一条值得单独说：**搜索引擎的结果页也只是一个页面**，所以一次抓取加一个选择器就能读，既不需要搜索 API，
+也没有按次计费。这也是本插件只暴露 `fetch` 的原因——**搜索是一次选择器调用，不是另一个工具**。各家引擎对
+客户端的拦截程度不同，一个拒绝请求就换一个。
 
 所有匹配项以换行拼接，并且结果会报告匹配到多少个：**"matched 48 element(s)"** 是"读全了"和"只读到一部分"
 的区别，也是你判断选择器太宽或太窄的唯一信号。
