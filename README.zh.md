@@ -441,10 +441,12 @@ profile。无论生效的是哪个代理，loopback 地址一律绕过它。
 
 ## 已知限制
 
-- **macOS 未经验证，Linux 是由贡献者而非维护者验证的。** 维护者是一名**没有 macOS / Linux 电脑**的
-  大学生；Linux 由 [@nd002723](https://github.com/nd002723) 在 Ubuntu 24.04 上独立验证通过（见
-  [平台支持](#平台支持)），而 macOS 从未在真机运行过。**任一平台出问题，都请带上报错信息开
-  [issue](https://github.com/27painter/dsh-moli/issues)**——那是这些路径能被打通的唯一途径。
+- **Linux 与 macOS 的路径由贡献者编写，维护者手上一台这样的机器都没有。** 维护者是一名**没有
+  macOS / Linux 电脑**的大学生，所以 POSIX 位置的引擎探测与 `sh` 安装器路径都来自
+  [@nd002723](https://github.com/nd002723)。Linux 由他在 Ubuntu 24.04 上验证通过；macOS 现在由 CI
+  覆盖——装官方 darwin 构建、在 `macos-latest`（Apple Silicon / arm64）上跑页面级测试，具体跑了什么见
+  [平台支持](#平台支持)。**但 CI 的虚拟机不等于用户的桌面**，任一平台出问题，都请带上报错信息开
+  [issue](https://github.com/27painter/dsh-moli/issues)——那仍是这些路径被真正打通的唯一途径。
 - **不包含 Moli 本体。** 需自行安装，或让 `moli_probe action=install` 替你拉取。
 - **只封装了 `fetch`。** `moli serve`（CDP/WebDriver 服务器）与 `moli import`（会话导入）尚未做成工具。
 - **抓取不支持单次取消。** 引擎对抓取是同步执行的，被中断的回合无法中途终止；已在进行的调用会跑完并
@@ -516,9 +518,10 @@ CI 在三个操作系统上分两层运行它们。**core** 层在 Ubuntu、Wind
 C 编译器来构建它的桩引擎。在 Windows 上，`@deepseek-ai/schemastery` 可以通过目录 junction 指到
 npm 全局 DSH 树来解析（与套件解析 `dsh-tools` 的方式相同）。
 
-`.github/workflows/verify.yml` 在 Linux、Windows、macOS 上跑 `schema-verify`、`empty-verify`、
-`scroll-verify` 与 `http-verify`（无需引擎、无需网络），在 Linux 与 Windows 上尝试依赖引擎的几套；
-若 runner 上没有引擎，则报告为跳过而不是失败。
+`.github/workflows/verify.yml` 的 **core** 层在 Linux、Windows、macOS 上跑 `schema-verify`、
+`empty-verify`、`config-verify`、`scroll-verify`、`selector-verify`、`http-verify` 与
+`link-install-verify`——无需引擎、无需网络。**engine** 层同样在三个系统上跑依赖引擎的几套，其中
+macOS 会先安装真实的 Moli 发行版；只有在套件本身是平台专属时，缺引擎才计为跳过。
 
 `report-verify.mjs` **故意不放进 CI**：其中三项会抓 `example.com`，还有一项抓一个具体的论坛帖子，因此它
 需要能上外网——如果这台机器的流量走代理，还需要那个代理可用。有网络时它是有用的，但**一个因为网站改版就变

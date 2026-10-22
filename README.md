@@ -474,12 +474,15 @@ form, so prefer editing the four fields above for routine configuration.
 
 ## Known limitations
 
-- **macOS is untested, and Linux was tested by the contributor rather than the maintainer.** The
-  maintainer is a student with no macOS or Linux machine, so Linux was verified independently by
-  [@nd002723](https://github.com/nd002723) on Ubuntu 24.04 (see [Platform support](#platform-support));
-  macOS has not been run on a real host at all. **If something fails on either, please open an
-  [issue](https://github.com/27painter/dsh-moli/issues) with the error output** — that is the only way
-  these paths get fixed.
+- **The Linux and macOS paths were written, and the maintainer's own hardware cannot run them.** The
+  maintainer is a student with no macOS or Linux machine, so engine discovery at the POSIX locations
+  and the `sh` installer route came from [@nd002723](https://github.com/nd002723). Linux was verified
+  by them on Ubuntu 24.04; macOS is now covered by CI, which installs the official darwin build and
+  runs the page-level suites on `macos-latest` (Apple Silicon, arm64) — see
+  [Platform support](#platform-support) for exactly what that exercised. **A CI runner is not a
+  desktop, so if something fails on either platform, please open an
+  [issue](https://github.com/27painter/dsh-moli/issues) with the error output** — that is still the
+  only way the paths users actually take get fixed.
 - **Moli itself is not bundled.** Install it separately or let `moli_probe action=install` fetch it.
 - **Only `fetch` is wrapped.** `moli serve` (CDP/WebDriver server) and `moli import` (session
   import) are not exposed as tools yet.
@@ -562,9 +565,11 @@ plugin found the engine, rendered pages, and the `scroll` and `selector` page ha
   sandbox — `curl.exe` times out on `127.0.0.1` while the Node host reaches it — so it uses a path
   under `example.com` and skips when the network is away.
 
-`.github/workflows/verify.yml` runs `schema-verify`, `empty-verify` and `scroll-verify` on Linux,
-Windows and macOS (they need no engine and no network) and attempts the engine-dependent suites on
-Linux and Windows, reporting a missing engine as a skip rather than a failure.
+`.github/workflows/verify.yml` runs `schema-verify`, `empty-verify`, `config-verify`, `scroll-verify`,
+`selector-verify`, `http-verify` and `link-install-verify` on Linux, Windows and macOS — the core
+tier, which needs no engine and no network. A second tier runs the engine-dependent suites on all
+three as well, and installs a real Moli release on macOS first, treating a missing engine as a skip
+there only where the suite is platform-specific.
 
 `report-verify.mjs` is deliberately **not** in CI. Three of its checks fetch `example.com` and one
 fetches a specific forum thread, so it needs the open internet — and on a host whose traffic goes
