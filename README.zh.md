@@ -369,7 +369,7 @@ Moli 仓库自带官方 agent skill：[`moli-webfetch`](https://github.com/lexmo
 |---|---|
 | **Windows** | 由维护者验证 |
 | **Linux** | **由贡献者验证，非维护者**：Ubuntu 24.04 LTS、Node v24.21.0、Moli 1.1.17——含异步安装路径、代理注入、以及 strace 记录的全链路抓取 |
-| **macOS** | 已实现，尚未在真机验证 |
+| **macOS** | **由 CI 验证，非个人 Mac**：`macos-latest`（Apple Silicon / arm64），从官方 release 下载真实 Moli 1.1.19 引擎。插件在 `~/.local/bin/moli` 找到它、渲染页面，`scroll` 与 `selector` 的端到端部分**实际运行并通过**（而不是跳过） |
 
 - **Windows** —— 引擎在官方安装位置查找（`%LOCALAPPDATA%\Moli\bin\moli.exe` 与 `%USERPROFILE%\.local\bin\moli.exe`），
   并以 `%LOCALAPPDATA%\Moli` 递归扫描兜底；`moli_probe action=install` 走官方 PowerShell 安装器。
@@ -467,6 +467,11 @@ profile。无论生效的是哪个代理，loopback 地址一律绕过它。
 ## 验证情况
 
 [`verify/`](verify/) 下有八个可直接对工作区运行的测试：
+
+CI 在三个操作系统上分两层运行它们。**core** 层在 Ubuntu、Windows、macOS 上都跑，不需要引擎，
+端到端部分用 `data:` URL，没有引擎时自动跳过。**engine** 层也在三个系统上都跑，但它会**先下载
+真实的 Moli 发行版**，并且**把"跳过"当作失败**——否则"测试通过"只等于"代码能加载"。[平台支持](#平台支持)
+里 macOS 那一行的依据就是它：插件找到了引擎、渲染了页面、`scroll` 与 `selector` 的页面部分实际执行。
 
 - `config-verify.mjs` 检查设置面与引擎生命周期：动态 `Config` schema（每个已声明字段、`engineAction`
   为 `none`/`install`/`uninstall` 三选一）、`apply` 同时接受普通配置与动态 `.get()` 引用、

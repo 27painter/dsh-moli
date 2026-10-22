@@ -403,7 +403,7 @@ Works on **Windows, Linux and macOS** (x64 / arm64).
 |---|---|
 | **Windows** | Verified by the maintainer |
 | **Linux** | Verified by the contributor, not the maintainer: Ubuntu 24.04 LTS, Node v24.21.0, Moli 1.1.17 — including the async install path, proxy injection, and a `strace`-recorded end-to-end fetch |
-| **macOS** | Implemented, not yet verified on a real host |
+| **macOS** | Verified in CI, not on a personal Mac: `macos-latest` (Apple Silicon, arm64) with a real Moli 1.1.19 engine downloaded from the official release. The plugin found it at `~/.local/bin/moli`, rendered pages, and the `scroll` and `selector` end-to-end halves passed instead of skipping |
 
 - **Windows** — the engine is located at the official installer paths (`%LOCALAPPDATA%\Moli\bin\moli.exe`,
   `%USERPROFILE%\.local\bin\moli.exe`) with a recursive scan of `%LOCALAPPDATA%\Moli` as a fallback.
@@ -510,6 +510,13 @@ form, so prefer editing the four fields above for routine configuration.
 ## Verification
 
 Eight suites live in [`verify/`](verify/), and all are runnable against a working tree:
+
+CI runs them on three operating systems, in two tiers. The **core** tier runs on Ubuntu, Windows
+and macOS and needs no engine; its end-to-end halves use `data:` URLs and skip when no engine is
+present. The **engine** tier runs on all three as well, but there it *downloads a real Moli
+release first* and treats a skip as a failure — otherwise "the tests passed" would only mean "the
+code loaded". That is what backs the macOS row in [Platform support](#platform-support): the
+plugin found the engine, rendered pages, and the `scroll` and `selector` page halves executed.
 
 - `config-verify.mjs` checks the settings surface and engine lifecycle added by the plugin's browser
   half: the volatile `Config` schema (every declared field, `engineAction` as a `none`/`install`/
