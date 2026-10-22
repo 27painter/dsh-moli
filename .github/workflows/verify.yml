@@ -157,3 +157,84 @@ jobs:
             exit 0
           fi
           exit 1
+
+  # macOS is in the core matrix but was never in the engine one, so nothing has
+  # ever checked that this plugin can actually drive a browser on a Mac. Moli does
+  # publish darwin builds (moli-<arch>-apple-darwin.tar.gz), so the gap is testable
+  # rather than inherent: install the engine, then run the suites whose end-to-end
+  # halves skip without one. If those halves report PASS instead of SKIP, the plugin
+  # found the engine and rendered a page on macOS.
+  engine-macos:
+    name: engine (macos-latest)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Moli for this architecture
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$(uname -m)" in
+            arm64)  asset=moli-aarch64-apple-darwin.tar.gz ;;
+            x86_64) asset=moli-x86_64-apple-darwin.tar.gz ;;
+            *) echo "::error::unhandled architecture $(uname -m)"; exit 1 ;;
+          esac
+          url="https://github.com/lexmount/moli/releases/latest/download/$asset"
+          echo "downloading $url"
+          curl -fsSL "$url" -o "$RUNNER_TEMP/moli.tar.gz"
+          tar -xzf "$RUNNER_TEMP/moli.tar.gz" -C "$RUNNER_TEMP"
+          # The archive holds moli-v<version>-<target>/moli; find it rather than
+          # spelling the version out, so a new release does not break this step.
+          bin="$(find "$RUNNER_TEMP" -maxdepth 2 -type f -name moli | head -n 1)"
+          test -n "$bin" || { echo "::error::no moli binary inside the archive"; exit 1; }
+          chmod +x "$bin"
+          # A curl download normally carries no quarantine attribute, but this costs
+          # nothing and removes a Gatekeeper failure mode that would look like a
+          # broken plugin.
+          xattr -dr com.apple.quarantine "$bin" 2>/dev/null || true
+          mkdir -p "$HOME/.local/bin"
+          cp "$bin" "$HOME/.local/bin/moli"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: The engine runs on this runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          moli --version
+          echo "arch: $(uname -m)"
+          echo "binary: $(command -v moli)"
+
+      - name: Which engine path the plugin resolves
+        run: |
+          node -e "import('./lib/moli.js').then(m => {
+            const p = m.findMoli(undefined);
+            console.log('findMoli ->', p === undefined ? '(not found)' : p);
+            if (p === undefined) process.exit(1);
+          })"
+
+      # Without an engine these two print a SKIP for their page half. With one they
+      # must actually render, which is the thing being tested -- so a SKIP here is
+      # the failure, not a pass. Both page halves use a data: URL and need no network.
+      - name: scroll-verify (page half must not skip)
+        shell: bash
+        run: |
+          set -o pipefail
+          node verify/scroll-verify.mjs 2>&1 | tee "$RUNNER_TEMP/scroll.log"
+          if grep -q 'SKIP' "$RUNNER_TEMP/scroll.log"; then
+            echo "::error::the engine is installed but the page half still skipped"
+            exit 1
+          fi
+
+      - name: selector-verify (page half must not skip)
+        shell: bash
+        run: |
+          set -o pipefail
+          node verify/selector-verify.mjs 2>&1 | tee "$RUNNER_TEMP/selector.log"
+          if grep -q 'SKIP' "$RUNNER_TEMP/selector.log"; then
+            echo "::error::the engine is installed but the page half still skipped"
+            exit 1
+          fi
