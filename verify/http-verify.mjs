@@ -35,6 +35,22 @@ check('present when true', buildArgs({ url: 'https://x/', failOnHttpError: true 
 check('not the suppressing variant', !buildArgs({ url: 'https://x/', failOnHttpError: true }).includes('--fail'),
   'uses --fail-with-body, which keeps the body');
 
+// The URL is caller input. Without `--` a value beginning with `-` is parsed as an
+// option, so a caller passing a user-supplied URL can inject engine flags -- and
+// even the benign case fails with a confusing "unexpected argument". Issue #6.
+console.log('\n1b. the URL is a positional argument, after --');
+const plain = buildArgs({ url: 'https://x/', dump: 'markdown' });
+check('ends with -- then the url', plain.at(-2) === '--' && plain.at(-1) === 'https://x/',
+  plain.join(' '));
+check('the url is the only positional', plain.filter(t => !t.startsWith('-') && t !== 'fetch' && t !== 'markdown').length === 1);
+const hostile = buildArgs({ url: '--https-proxy=http://attacker:8080', dump: 'markdown' });
+check('a url starting with - is still positional',
+  hostile.at(-2) === '--' && hostile.at(-1) === '--https-proxy=http://attacker:8080', hostile.join(' '));
+check('and did not turn into a flag', !hostile.includes('--https-proxy'));
+const shaped = buildArgs({ url: '-o/tmp/x' });
+check('an -o-shaped url is not an output flag', shaped.at(-1) === '-o/tmp/x' && shaped.includes('--'),
+  shaped.join(' '));
+
 console.log('\n2. the response waits map to their flags');
 const a = buildArgs({ url: 'https://x/', waitResponseUrl: '/api/list' });
 check('waitResponseUrl sets --wait-response-url', after(a, '--wait-response-url') === '/api/list');
