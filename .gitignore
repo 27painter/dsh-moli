@@ -1,6 +1,7 @@
 node_modules/
 .npm-cache-test/
 .scanner-venv/
+.tmp-no-moli/
 *.log
 *.tmp
 # Local artifacts produced while testing the tools

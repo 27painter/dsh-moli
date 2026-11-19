@@ -221,13 +221,19 @@ try {
   }
 
   if (!verifyLiveSearch) {
-    const searched = await request('tools/call', {
-      name: 'moli_search',
-      arguments: { query: 'offline fixture', limit: 5 },
-    }, 60000);
-    const value = searched.result?.structuredContent;
-    check('moli_search falls back after an empty provider', value?.ok === true && value?.attempts?.length === 2, String(value?.error ?? ''));
-    check('moli_search returns a structured result', value?.results?.[0]?.title === 'Example Result' && value?.results?.[0]?.url === 'https://example.com/result');
+    if (exe === undefined) {
+      skipped('moli_search offline fixture', 'no Moli engine installed');
+    } else {
+      const searched = await request('tools/call', {
+        name: 'moli_search',
+        arguments: { query: 'offline fixture', limit: 5 },
+      }, 60000);
+      const value = searched.result?.structuredContent;
+      check('moli_search falls back after an empty provider', value?.ok === true && value?.attempts?.length === 2, String(value?.error ?? ''));
+      check('moli_search returns a structured result', value?.results?.[0]?.title === 'Example Result' && value?.results?.[0]?.url === 'https://example.com/result');
+    }
+  } else if (exe === undefined) {
+    skipped('moli_search live provider check', 'no Moli engine installed');
   } else {
     const searched = await request('tools/call', {
       name: 'moli_search',
