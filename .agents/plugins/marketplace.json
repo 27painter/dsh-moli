@@ -1,0 +1,20 @@
+{
+  "name": "27painter-codex",
+  "interface": {
+    "displayName": "27painter Codex Plugins"
+  },
+  "plugins": [
+    {
+      "name": "moli",
+      "source": {
+        "source": "local",
+        "path": "./plugins/codex-moli"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

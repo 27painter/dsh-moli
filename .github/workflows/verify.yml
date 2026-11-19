@@ -48,6 +48,15 @@ jobs:
       - name: Install plugin dependencies
         run: npm install --no-audit --no-fund
 
+      # The Codex plugin is a self-contained MCP stdio bundle built from the same
+      # browser core. Its adapter, manifests, handshake and offline data: fetch
+      # contract run on every OS before the DSH-specific suites.
+      - name: Codex plugin build
+        run: npm run build:codex
+
+      - name: Codex plugin verify
+        run: npm run verify:codex
+
       # schema-verify imports the registry's own validator out of the DSH install
       # (`@deepseek-ai/dsh-tools`), because the plain `ctx.tools.register` path is
       # where two registration failures shipped from. It is not a dependency of the
@@ -215,6 +224,13 @@ jobs:
             console.log('findMoli ->', p === undefined ? '(not found)' : p);
             if (p === undefined) process.exit(1);
           })"
+
+      # The Codex contract normally skips its page fetch when no engine exists.
+      # This runner has one, so the MCP transport and the actual Moli call must run.
+      - name: Codex plugin build and end-to-end MCP verify
+        run: |
+          npm run build:codex
+          npm run verify:codex
 
       # Without an engine these two print a SKIP for their page half. With one they
       # must actually render, which is the thing being tested -- so a SKIP here is

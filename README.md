@@ -4,9 +4,10 @@
 [![license](https://img.shields.io/npm/l/dsh-moli)](LICENSE)
 [![listed in awesome-dsh-plugin](https://img.shields.io/badge/awesome--dsh--plugin-listed-3964fe)](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)
 
-**Two tools that let a DeepSeek Harness agent drive a real headless browser.** They wrap
-[Moli](https://github.com/lexmount/moli) — a Rust headless browser built for AI agents — so an agent can
-read pages that only exist after JavaScript runs, and can produce pictures of them.
+**A local Moli browser bridge for DeepSeek Harness and Codex.** DSH gets two tools; the same repository
+also provides a persistent Codex MCP plugin. Both wrap [Moli](https://github.com/lexmount/moli) — a Rust
+headless browser built for AI agents — so an agent can read pages that only exist after JavaScript
+runs, search the web, and produce screenshots or PDFs.
 
 English | [中文](README.zh.md)
 
@@ -25,7 +26,7 @@ DSH already covers it with `web_fetch`. It is not enough for anything a browser 
   on a real feed measured 1,779 characters against 139,338 for the same page as Markdown. If you are
   about to fetch a listing page and skim it, read the `selector` section under Usage first.
 
-For those jobs this plugin gives the agent two tools:
+For those jobs the DSH plugin gives the agent two tools:
 
 | Tool | What it does |
 |---|---|
@@ -64,12 +65,13 @@ dsh plugin --profile web add github:27painter/dsh-moli
 > [!IMPORTANT]
 > **The npm package is the plugin only — it does not contain the Moli engine.**
 >
-> The npm tarball is 26 kB: eight JavaScript and text files. `moli.exe` is a separate ~101 MB compiled
-> Rust binary, built and released by the Moli project on its own schedule.
+> The npm tarball contains nine JavaScript and text files and is roughly 70–80 kB. It does not include
+> the Codex MCP bundle, which is distributed from the repository's GitHub marketplace. `moli.exe` is a
+> separate ~101 MB compiled Rust binary, built and released by the Moli project on its own schedule.
 >
 > **Why it cannot be bundled:**
 >
-> - **Size.** The engine is roughly 4,000× the plugin. Every install and every plugin update would
+> - **Size.** The engine is roughly 1,300× the npm plugin. Every install and every plugin update would
 >   carry a browser.
 > - **Ownership.** Moli is `lexmount/moli` under its own MIT copyright. Redistributing its binary
 >   through this package would mean re-publishing someone else's artifact as our own.
@@ -211,6 +213,79 @@ local checkout the four steps are:
 An unresolvable bundle is **skipped silently** apart from one stderr line
 (`skipping profile bundle …`). If the tools never appear, that line is the first thing to look for.
 
+## Codex local MCP plugin
+
+The same repository also exposes a Codex-only local stdio MCP plugin under
+[`plugins/codex-moli`](https://github.com/27painter/dsh-moli/tree/main/plugins/codex-moli). It uses the same `lib/moli.js` core as the DSH plugin,
+but runs as a private GitHub marketplace entry rather than a public directory submission.
+
+```powershell
+codex plugin marketplace add 27painter/dsh-moli --ref main
+codex plugin add moli@27painter-codex
+```
+
+For a local checkout, point the marketplace at the repository directory instead:
+
+```powershell
+codex plugin marketplace add D:\dsh_plugins\dsh-moli
+codex plugin add moli@27painter-codex
+```
+
+After changing the shared core or the Codex adapter, rebuild and reinstall the plugin, then start a new
+Codex conversation so the MCP tool catalog is reloaded:
+
+```powershell
+npm run build:codex
+npm run verify:codex
+codex plugin add moli@27painter-codex
+```
+
+It registers four persistent tools:
+
+| Tool | Purpose |
+|---|---|
+| `moli_search` | Search the web through Moli and return structured title, URL, and snippet results |
+| `moli_fetch` | Fetch a page and return rendered Markdown, HTML, a selector match, or an eval result |
+| `moli_capture` | Capture a page as PNG or PDF |
+| `moli_probe` | Inspect or explicitly install the local Moli engine |
+
+The MCP server reads these optional environment variables when Codex launches it:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `MOLI_BIN` | auto-detected | Absolute path to the Moli executable |
+| `MOLI_PROXY` | `HTTPS_PROXY`, `HTTP_PROXY`, or `ALL_PROXY` when present | Forward proxy for search and fetch calls |
+| `MOLI_SEARCH_URL` | built-in fallback chain | One search URL template containing `{query}` |
+| `MOLI_SEARCH_URLS` | Bing → DuckDuckGo HTML → Brave | Multiple templates separated by `\|` |
+| `MOLI_SEARCH_ATTEMPT_TIMEOUT_MS` | `20000` | Deadline for each fallback provider |
+| `MOLI_INSECURE_TLS` | `0` | Set to `1` only when the network's certificate-revocation check is broken |
+| `MOLI_TIMEOUT_MS` | `30000` | Default page-readiness timeout |
+| `MOLI_MAX_CHARS` | `200000` | Inline text truncation budget |
+
+`moli_search` tries each provider until one returns at least one structured result. An empty result
+page is not accepted as a successful search; the returned value includes every provider attempt,
+the configured proxy, and the selected provider.
+
+To make Moli the normal web-search path in your own Codex configuration, disable the built-in
+search before the first TOML table:
+
+```toml
+web_search = "disabled"
+
+[plugins."moli@27painter-codex"]
+enabled = true
+```
+
+The plugin is built from the shared core with:
+
+```powershell
+npm run build:codex
+npm run verify:codex
+```
+
+Codex does not require the public plugin directory or a local-MCP partner allowlist for this
+GitHub-marketplace route.
+
 ## Usage
 
 `moli_fetch` parameters: `url` (required), `dump`, `writeTo`, `selector`, `eval`, `scroll`, `wait`,
@@ -255,8 +330,9 @@ moli_fetch url="https://www.bing.com/search?q=deepseek+harness" selector=".b_alg
 
 That last one is worth pointing out: **a search engine's results page is just a page**, so
 one fetch plus one selector reads it, with no search API and no per-query cost. It is also
-why the plugin still exposes only `fetch` — searching is a selector call, not a separate
-tool. Engines block clients at different rates, so if one refuses the request, try another.
+why the DSH plugin still exposes only `fetch` — searching is a selector call, not a separate DSH
+tool. The Codex MCP plugin adds `moli_search` because its product goal is a browser-backed search
+entry point. Engines block clients at different rates, so if one refuses the request, try another.
 
 All matches are joined with newlines and the result reports how many there were:
 "matched 48 element(s)" is the difference between a complete read and a partial one,
@@ -512,7 +588,7 @@ form, so prefer editing the four fields above for routine configuration.
 
 ## Verification
 
-Eight suites live in [`verify/`](verify/), and all are runnable against a working tree:
+The test suites live in [`verify/`](verify/), and all are runnable against a working tree:
 
 CI runs them on three operating systems, in two tiers. The **core** tier runs on Ubuntu, Windows
 and macOS and needs no engine; its end-to-end halves use `data:` URLs and skip when no engine is
@@ -564,12 +640,16 @@ plugin found the engine, rendered pages, and the `scroll` and `selector` page ha
   The end-to-end half needs an HTTP error from a real server: loopback is unreachable from inside this
   sandbox — `curl.exe` times out on `127.0.0.1` while the Node host reaches it — so it uses a path
   under `example.com` and skips when the network is away.
+- `codex-plugin-verify.mjs` validates the Codex marketplace and manifests, checks that the built MCP
+  bundle is self-contained and current with the shared core, performs the stdio initialize/tools
+  handshake, exercises fetch/probe/capture through MCP, and verifies search-provider fallback with an
+  offline rendered result page.
 
-`.github/workflows/verify.yml` runs `schema-verify`, `empty-verify`, `config-verify`, `scroll-verify`,
-`selector-verify`, `http-verify` and `link-install-verify` on Linux, Windows and macOS — the core
-tier, which needs no engine and no network. A second tier runs the engine-dependent suites on all
-three as well, and installs a real Moli release on macOS first, treating a missing engine as a skip
-there only where the suite is platform-specific.
+`.github/workflows/verify.yml` builds and verifies the Codex plugin, then runs `schema-verify`,
+`empty-verify`, `config-verify`, `scroll-verify`, `selector-verify`, `http-verify` and
+`link-install-verify` on Linux, Windows and macOS — the core tier, which needs no network. A second
+tier runs the engine-dependent suites, and the macOS runner installs a real Moli release so the Codex
+MCP fetch/capture path must execute rather than skip.
 
 `report-verify.mjs` is deliberately **not** in CI. Three of its checks fetch `example.com` and one
 fetches a specific forum thread, so it needs the open internet — and on a host whose traffic goes
@@ -595,7 +675,18 @@ Confirmed at runtime too: a JavaScript-rendered page (GitHub search) returned 14
 Markdown containing 30 real repository matches when fetched through a local proxy. A throwaway
 profile with the plugin installed composes its config with no `JsonSchemaError` and no skipped bundle.
 
-## Version note: 1.1.11 and 1.1.12 are deprecated
+## Version 2.1.0
+
+Version 2.1.0 adds the Codex-only local MCP plugin while keeping the DSH tool contract unchanged.
+The Codex plugin adds persistent `moli_search`, `moli_fetch`, `moli_capture` and `moli_probe` tools,
+multi-provider search fallback (Bing → DuckDuckGo HTML → Brave), proxy-aware diagnostics, and a
+self-contained build generated from the same `lib/moli.js` and `lib/install.js` core.
+
+The DSH plugin still provides its existing `moli_fetch` and `moli_probe` tools. The new Codex files
+are intentionally excluded from the npm tarball and distributed through the repository's GitHub
+marketplace.
+
+## Historical version note: 1.1.11 and 1.1.12 are deprecated
 
 **Use 1.1.13 or later.** Two releases between them carried an interactive-browser experiment —
 `moli_session`, a second Chromium backend, a raw-CDP escape hatch, per-call CDP endpoints, persistent

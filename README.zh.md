@@ -4,9 +4,9 @@
 [![license](https://img.shields.io/npm/l/dsh-moli)](LICENSE)
 [![已收录于 awesome-dsh-plugin](https://img.shields.io/badge/awesome--dsh--plugin-%E5%B7%B2%E6%94%B6%E5%BD%95-3964fe)](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)
 
-**两个工具，让 DeepSeek Harness 的 agent 能驱动真正的无头浏览器。** 它们封装
-[Moli](https://github.com/lexmount/moli)——一个专为 AI agent 打造的 Rust 无头浏览器——所以 agent 能看到
-那些"必须跑完 JavaScript 才存在"的页面内容，也能把它们拍成图。
+**一个同时服务 DeepSeek Harness 与 Codex 的本地 Moli 浏览器桥。** DSH 获得两个工具；同一个仓库还提供
+常驻 Codex MCP 插件。两者都封装 [Moli](https://github.com/lexmount/moli)——一个专为 AI agent 打造的
+Rust 无头浏览器——所以 agent 能看到那些"必须跑完 JavaScript 才存在"的页面内容，也能搜索网页、截图或生成 PDF。
 
 [English](README.md) | 中文
 
@@ -22,7 +22,7 @@
 - **只用 7% 的篇幅读完一个列表**——`selector` 只返回匹配到的容器，实测在一个真实信息流上是 **1,779 字符，
   而同一页面走 markdown 是 139,338**。如果你正准备抓一个列表页再自己筛，先看 Usage 里的 `selector` 一节。
 
-针对这些场景，本插件给 agent 两个工具：
+针对这些场景，DSH 插件给 agent 两个工具：
 
 | 工具 | 作用 |
 |---|---|
@@ -61,12 +61,13 @@ dsh plugin --profile web add github:27painter/dsh-moli
 > [!IMPORTANT]
 > **npm 包只有插件，不含 Moli 引擎。**
 >
-> npm tarball 是 26 kB：八个 JavaScript 与文本文件。`moli.exe` 是另外的东西——约 101 MB 的 Rust 编译
-> 产物，由 Moli 项目按自己的节奏构建和发布。
+> npm tarball 包含九个 JavaScript 与文本文件，体积约 70–80 kB；它**不包含** Codex MCP 插件包，后者通过
+> 仓库的 GitHub 插件市场分发。`moli.exe` 是另外的东西——约 101 MB 的 Rust 编译产物，由 Moli 项目按
+> 自己的节奏构建和发布。
 >
 > **为什么不能打包进来：**
 >
-> - **体积。** 引擎约为插件的 4,000 倍。每次安装、每次插件更新都要顺带搬运一个浏览器。
+> - **体积。** 引擎约为 npm 插件的 1,300 倍。每次安装、每次插件更新都要顺带搬运一个浏览器。
 > - **归属。** Moli 是 `lexmount/moli`，版权属于它自己的 MIT 署名。把它家的二进制经由本包再分发，等于
 >   把别人的产物当自己的发布。
 > - **平台。** 引擎按操作系统与架构分别发布——Windows/Linux/macOS × x64/arm64。打包进来等于把某一个
@@ -199,6 +200,75 @@ profile 插件需要两半都齐：依赖边（`dependencies`）+ `dsh.profile.b
 无法解析的 bundle 会被**静默跳过**，只在 stderr 留一行 `skipping profile bundle …`。工具迟迟不出现时先找
 这行。
 
+## Codex 本地 MCP 插件
+
+同一个仓库还在 [`plugins/codex-moli`](https://github.com/27painter/dsh-moli/tree/main/plugins/codex-moli) 提供 Codex 专用的本地 stdio MCP。
+它复用根目录 `lib/moli.js`，通过私人 GitHub 插件市场分发，不进入公共插件目录。
+
+```powershell
+codex plugin marketplace add 27painter/dsh-moli --ref main
+codex plugin add moli@27painter-codex
+```
+
+本地检出的仓库可以直接把目录添加为市场：
+
+```powershell
+codex plugin marketplace add D:\dsh_plugins\dsh-moli
+codex plugin add moli@27painter-codex
+```
+
+修改共享核心或 Codex 适配层后，重新构建、验证并安装，然后新建 Codex 会话以重新加载 MCP 工具目录：
+
+```powershell
+npm run build:codex
+npm run verify:codex
+codex plugin add moli@27painter-codex
+```
+
+安装后常驻四个工具：
+
+| 工具 | 用途 |
+|---|---|
+| `moli_search` | 通过 Moli 搜索网页，并返回结构化的标题、URL 和摘要 |
+| `moli_fetch` | 抓取页面，返回渲染后的 Markdown、HTML、选择器结果或 eval 结果 |
+| `moli_capture` | 将页面保存为 PNG 或 PDF |
+| `moli_probe` | 检查或显式安装本地 Moli 引擎 |
+
+MCP Server 在 Codex 启动它时会读取以下可选环境变量：
+
+| 变量 | 默认值 | 含义 |
+|---|---|---|
+| `MOLI_BIN` | 自动探测 | Moli 可执行文件的绝对路径 |
+| `MOLI_PROXY` | 优先使用现有 `HTTPS_PROXY`、`HTTP_PROXY` 或 `ALL_PROXY` | 搜索和抓取使用的转发代理 |
+| `MOLI_SEARCH_URL` | 内置降级链 | 一个包含 `{query}` 的搜索 URL 模板 |
+| `MOLI_SEARCH_URLS` | Bing → DuckDuckGo HTML → Brave | 用 `\|` 分隔多个模板 |
+| `MOLI_SEARCH_ATTEMPT_TIMEOUT_MS` | `20000` | 每个降级搜索源的单次超时 |
+| `MOLI_INSECURE_TLS` | `0` | 只有证书吊销检查确实损坏时才设为 `1` |
+| `MOLI_TIMEOUT_MS` | `30000` | 默认页面就绪超时 |
+| `MOLI_MAX_CHARS` | `200000` | 内联文本截断预算 |
+
+`moli_search` 会依次尝试多个搜索源，直到某一个返回至少一条结构化结果。零结果不再被当作成功
+搜索；结果里会保留每个搜索源的尝试状态、当前代理和最终选中的搜索源。
+
+如果希望自己的 Codex 默认用 Moli 承担网页搜索，可以把下面的顶层配置放在第一个 TOML
+table 之前：
+
+```toml
+web_search = "disabled"
+
+[plugins."moli@27painter-codex"]
+enabled = true
+```
+
+Codex 插件由共享核心构建：
+
+```powershell
+npm run build:codex
+npm run verify:codex
+```
+
+从自己的 GitHub 市场安装不需要公共目录审核，也不需要本地 MCP 合作伙伴白名单。
+
 ## 用法
 
 `moli_fetch` 参数：`url`（必填）、`dump`、`writeTo`、`selector`、`eval`、`scroll`、`wait`、
@@ -240,8 +310,9 @@ moli_fetch url="https://www.bing.com/search?q=deepseek+harness" selector=".b_alg
 ```
 
 最后一条值得单独说：**搜索引擎的结果页也只是一个页面**，所以一次抓取加一个选择器就能读，既不需要搜索 API，
-也没有按次计费。这也是本插件只暴露 `fetch` 的原因——**搜索是一次选择器调用，不是另一个工具**。各家引擎对
-客户端的拦截程度不同，一个拒绝请求就换一个。
+也没有按次计费。这也是 DSH 插件只暴露 `fetch` 的原因——**搜索在 DSH 中是一次选择器调用，不是另一个
+工具**。Codex MCP 的目标不同，因此额外提供 `moli_search`。各家引擎对客户端的拦截程度不同，一个拒绝请求
+就换一个。
 
 所有匹配项以换行拼接，并且结果会报告匹配到多少个：**"matched 48 element(s)"** 是"读全了"和"只读到一部分"
 的区别，也是你判断选择器太宽或太窄的唯一信号。
@@ -468,7 +539,7 @@ profile。无论生效的是哪个代理，loopback 地址一律绕过它。
 
 ## 验证情况
 
-[`verify/`](verify/) 下有八个可直接对工作区运行的测试：
+[`verify/`](verify/) 下有可直接对工作区运行的测试：
 
 CI 在三个操作系统上分两层运行它们。**core** 层在 Ubuntu、Windows、macOS 上都跑，不需要引擎，
 端到端部分用 `data:` URL，没有引擎时自动跳过。**engine** 层也在三个系统上都跑，但它会**先下载
@@ -505,6 +576,8 @@ CI 在三个操作系统上分两层运行它们。**core** 层在 Ubuntu、Wind
   `evalDiscarded` 标记且警告渲染在最前，`scroll` 单独用返回的是文档而不是滚动偏移。端到端部分需要一个真实
   服务器的 HTTP 错误：**本沙箱内无法访问 loopback**——`curl.exe` 连 `127.0.0.1` 会超时，而 Node 宿主进程
   可以——所以它用 `example.com` 下的一个路径，网络不可用时跳过。
+- `codex-plugin-verify.mjs` 校验 Codex marketplace 和清单，确认 MCP 构建包自包含且与共享核心一致，执行
+  stdio 初始化与工具目录握手，通过 MCP 实际调用 fetch/probe/capture，并用离线渲染页验证搜索源降级。
 
 ### 测试前置条件
 
@@ -518,10 +591,10 @@ CI 在三个操作系统上分两层运行它们。**core** 层在 Ubuntu、Wind
 C 编译器来构建它的桩引擎。在 Windows 上，`@deepseek-ai/schemastery` 可以通过目录 junction 指到
 npm 全局 DSH 树来解析（与套件解析 `dsh-tools` 的方式相同）。
 
-`.github/workflows/verify.yml` 的 **core** 层在 Linux、Windows、macOS 上跑 `schema-verify`、
-`empty-verify`、`config-verify`、`scroll-verify`、`selector-verify`、`http-verify` 与
-`link-install-verify`——无需引擎、无需网络。**engine** 层同样在三个系统上跑依赖引擎的几套，其中
-macOS 会先安装真实的 Moli 发行版；只有在套件本身是平台专属时，缺引擎才计为跳过。
+`.github/workflows/verify.yml` 会先构建并验证 Codex 插件，再在 Linux、Windows、macOS 上跑
+`schema-verify`、`empty-verify`、`config-verify`、`scroll-verify`、`selector-verify`、
+`http-verify` 与 `link-install-verify`——该层无需网络。**engine** 层运行依赖引擎的套件，macOS
+会先安装真实 Moli 发行版，因此 Codex MCP 的 fetch/capture 路径必须实际执行，而不是跳过。
 
 `report-verify.mjs` **故意不放进 CI**：其中三项会抓 `example.com`，还有一项抓一个具体的论坛帖子，因此它
 需要能上外网——如果这台机器的流量走代理，还需要那个代理可用。有网络时它是有用的，但**一个因为网站改版就变
@@ -537,7 +610,16 @@ dump、`eval`（含针对 `-t` 参数位置的紧超时回归防护）、PNG 与
 30 处真实结果匹配。另有一个装了本插件的一次性 profile，组合其配置时既无 `JsonSchemaError` 也无被跳过的
 bundle。
 
-## 版本说明：1.1.11 与 1.1.12 已废弃
+## 版本 2.1.0
+
+2.1.0 在保持 DSH 工具接口不变的前提下，新增 Codex 专用本地 MCP 插件。Codex 侧常驻
+`moli_search`、`moli_fetch`、`moli_capture` 和 `moli_probe`，支持 Bing → DuckDuckGo HTML → Brave
+多搜索源降级、代理诊断，以及从同一份 `lib/moli.js` 与 `lib/install.js` 核心生成的自包含构建包。
+
+DSH 侧仍提供原有的 `moli_fetch` 与 `moli_probe`。新增 Codex 文件不会进入 npm tarball，而是通过仓库的
+GitHub 插件市场分发。
+
+## 历史版本说明：1.1.11 与 1.1.12 已废弃
 
 **请使用 1.1.13 或更高版本。** 这两个版本之间夹着一次"交互式浏览器"实验——`moli_session`、第二个
 Chromium 后端、原始 CDP 逃生舱、按调用的 CDP 端点、持久化浏览器 profile——约 2300 行机制，远远超出了这个
