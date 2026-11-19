@@ -682,7 +682,7 @@ profile with the plugin installed composes its config with no `JsonSchemaError` 
 
 Version 2.1.1 adds Codex plugin-directory compatibility metadata: a legacy
 `.codex-plugin/plugin.json` overlay, package-local security and license files,
-SHA-pinned Actions, Dependabot, and the HOL Plugin Scanner workflow. The MCP
+SHA-pinned Actions, and the HOL Plugin Scanner workflow. The MCP
 tool interface is unchanged.
 
 ## Version 2.1.0

@@ -50,7 +50,6 @@ check('plugin package has a security policy', existsSync(join(pluginRoot, 'SECUR
 check('plugin package has a license', existsSync(join(pluginRoot, 'LICENSE')));
 check('plugin package has third-party notices', existsSync(join(pluginRoot, 'THIRD-PARTY-NOTICES.md')));
 check('plugin package has a lockfile', existsSync(join(pluginRoot, 'package-lock.json')));
-check('repository has Dependabot configuration', existsSync(join(repo, '.github', 'dependabot.yml')));
 check('repository has a HOL scanner workflow', existsSync(join(repo, '.github', 'workflows', 'hol-plugin-scanner.yml')));
 const workflows = readdirSync(join(repo, '.github', 'workflows')).filter(file => /\.ya?ml$/u.test(file));
 const unpinned = workflows.flatMap(file => {

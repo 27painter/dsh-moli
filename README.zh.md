@@ -616,7 +616,7 @@ bundle。
 ## 版本 2.1.1
 
 2.1.1 增加 Codex 插件目录兼容材料：旧式 `.codex-plugin/plugin.json` 兼容清单、插件目录内的
-安全与许可文件、固定 SHA 的 Actions、Dependabot，以及 HOL Plugin Scanner 工作流。MCP 工具接口不变。
+安全与许可文件、固定 SHA 的 Actions，以及 HOL Plugin Scanner 工作流。MCP 工具接口不变。
 
 ## 版本 2.1.0
 
