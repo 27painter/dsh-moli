@@ -1,0 +1,27 @@
+name: HOL Plugin Scanner
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Scan Codex plugin
+        uses: hashgraph-online/ai-plugin-scanner-action@caba2e96aa8ad2feb6cf6fca52442b52e22e779f
+        with:
+          plugin_dir: "./plugins/codex-moli"
+          mode: scan
+          min_score: 75
+          fail_on_severity: none
+          format: sarif
+          upload_sarif: true

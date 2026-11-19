@@ -16,6 +16,9 @@ const dist = join(pluginRoot, 'dist');
 const pkg = JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8'));
 const manifestPath = join(pluginRoot, 'plugin.json');
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+const compatibilityManifestPath = join(pluginRoot, '.codex-plugin', 'plugin.json');
+const compatibilityManifest = JSON.parse(readFileSync(compatibilityManifestPath, 'utf8'));
+const pluginPackage = JSON.parse(readFileSync(join(pluginRoot, 'package.json'), 'utf8'));
 
 function ensureInside(parent, child) {
   const pathFromParent = relative(resolve(parent), resolve(child));
@@ -27,6 +30,12 @@ function ensureInside(parent, child) {
 ensureInside(pluginRoot, dist);
 if (manifest.version !== pkg.version) {
   throw new Error(`plugin.json version ${String(manifest.version)} does not match package.json ${pkg.version}`);
+}
+if (compatibilityManifest.version !== pkg.version) {
+  throw new Error(`.codex-plugin/plugin.json version ${String(compatibilityManifest.version)} does not match package.json ${pkg.version}`);
+}
+if (pluginPackage.version !== pkg.version) {
+  throw new Error(`Codex plugin package version ${String(pluginPackage.version)} does not match package.json ${pkg.version}`);
 }
 
 rmSync(dist, { recursive: true, force: true });

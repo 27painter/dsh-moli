@@ -61,7 +61,7 @@ dsh plugin --profile web add github:27painter/dsh-moli
 > [!IMPORTANT]
 > **npm 包只有插件，不含 Moli 引擎。**
 >
-> npm tarball 包含九个 JavaScript 与文本文件，体积约 70–80 kB；它**不包含** Codex MCP 插件包，后者通过
+> npm tarball 包含十个 JavaScript 与文本文件，体积约 70–80 kB；它**不包含** Codex MCP 插件包，后者通过
 > 仓库的 GitHub 插件市场分发。`moli.exe` 是另外的东西——约 101 MB 的 Rust 编译产物，由 Moli 项目按
 > 自己的节奏构建和发布。
 >
@@ -233,6 +233,9 @@ codex plugin add moli@27painter-codex
 | `moli_fetch` | 抓取页面，返回渲染后的 Markdown、HTML、选择器结果或 eval 结果 |
 | `moli_capture` | 将页面保存为 PNG 或 PDF |
 | `moli_probe` | 检查或显式安装本地 Moli 引擎 |
+
+插件的本地执行、网络、代理、Cookie、TLS 与安装器边界见
+[SECURITY.md](https://github.com/27painter/dsh-moli/blob/main/SECURITY.md)。
 
 MCP Server 在 Codex 启动它时会读取以下可选环境变量：
 
@@ -609,6 +612,11 @@ dump、`eval`（含针对 `-t` 参数位置的紧超时回归防护）、PNG 与
 运行时也确认过：走本地代理抓取 JavaScript 渲染页面（GitHub 搜索）返回 14,560 字符 Markdown，其中包含
 30 处真实结果匹配。另有一个装了本插件的一次性 profile，组合其配置时既无 `JsonSchemaError` 也无被跳过的
 bundle。
+
+## 版本 2.1.1
+
+2.1.1 增加 Codex 插件目录兼容材料：旧式 `.codex-plugin/plugin.json` 兼容清单、插件目录内的
+安全与许可文件、固定 SHA 的 Actions、Dependabot，以及 HOL Plugin Scanner 工作流。MCP 工具接口不变。
 
 ## 版本 2.1.0
 

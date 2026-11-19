@@ -1,6 +1,6 @@
 {
   "name": "dsh-moli",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "type": "module",
   "description": "DeepSeek Harness tools for the local Moli headless browser: rendered fetches, markdown, semantic trees, screenshots, and PDFs.",
   "license": "MIT",
@@ -48,6 +48,7 @@
     "cordis.patch.yml",
     "README.md",
     "README.zh.md",
+    "SECURITY.md",
     "LICENSE"
   ],
   "scripts": {

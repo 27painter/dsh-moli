@@ -4,7 +4,7 @@
 // network access. It skips only when no Moli engine is installed.
 
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -34,10 +34,32 @@ const skipped = (label, reason) => {
 console.log('1. package and marketplace manifests');
 const pkg = JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8'));
 const manifest = JSON.parse(readFileSync(join(pluginRoot, 'plugin.json'), 'utf8'));
+const compatibilityManifest = JSON.parse(readFileSync(join(pluginRoot, '.codex-plugin', 'plugin.json'), 'utf8'));
+const pluginPackage = JSON.parse(readFileSync(join(pluginRoot, 'package.json'), 'utf8'));
 const mcp = JSON.parse(readFileSync(join(pluginRoot, 'mcp.json'), 'utf8'));
 const marketplace = JSON.parse(readFileSync(join(repo, '.agents', 'plugins', 'marketplace.json'), 'utf8'));
 check('plugin version matches package version', manifest.version === pkg.version, `${manifest.version}`);
+check('compatibility manifest version matches package version', compatibilityManifest.version === pkg.version, `${compatibilityManifest.version}`);
+check('plugin package version matches package version', pluginPackage.version === pkg.version, `${pluginPackage.version}`);
 check('plugin name is stable', manifest.name === 'moli');
+check('compatibility manifest uses the same name', compatibilityManifest.name === 'moli');
+check('compatibility manifest references skills', compatibilityManifest.skills === './skills/');
+check('compatibility manifest references the MCP configuration', compatibilityManifest.mcpServers === './mcp.json');
+check('repository has a security policy', existsSync(join(repo, 'SECURITY.md')));
+check('plugin package has a security policy', existsSync(join(pluginRoot, 'SECURITY.md')));
+check('plugin package has a license', existsSync(join(pluginRoot, 'LICENSE')));
+check('plugin package has third-party notices', existsSync(join(pluginRoot, 'THIRD-PARTY-NOTICES.md')));
+check('plugin package has a lockfile', existsSync(join(pluginRoot, 'package-lock.json')));
+check('repository has Dependabot configuration', existsSync(join(repo, '.github', 'dependabot.yml')));
+check('repository has a HOL scanner workflow', existsSync(join(repo, '.github', 'workflows', 'hol-plugin-scanner.yml')));
+const workflows = readdirSync(join(repo, '.github', 'workflows')).filter(file => /\.ya?ml$/u.test(file));
+const unpinned = workflows.flatMap(file => {
+  const text = readFileSync(join(repo, '.github', 'workflows', file), 'utf8');
+  return [...text.matchAll(/uses:\s+([^\s#]+)/gu)]
+    .map(match => ({ file, use: match[1] }))
+    .filter(entry => !/@[0-9a-f]{40}$/u.test(entry.use));
+});
+check('all workflow actions are SHA-pinned', unpinned.length === 0, unpinned.map(entry => `${entry.file}:${entry.use}`).join(', '));
 check('marketplace contains the plugin', marketplace.plugins?.some(entry => entry.name === 'moli'));
 check('marketplace uses the plugin subdirectory', marketplace.plugins?.some(entry => entry.source?.path === './plugins/codex-moli'));
 check('MCP server is local stdio', mcp.mcpServers?.moli?.type === 'stdio');
@@ -47,6 +69,8 @@ console.log('\n2. build output is self-contained');
 for (const file of ['server.mjs', join('lib', 'moli.js'), join('lib', 'install.js')]) {
   check(`dist includes ${file}`, existsSync(join(dist, file)));
 }
+const logo = readFileSync(join(pluginRoot, 'assets', 'logo.svg'), 'utf8');
+check('listing icon declares 512x512 dimensions', /<svg[^>]*\bwidth="512"[^>]*\bheight="512"/u.test(logo));
 const serverText = readFileSync(join(dist, 'server.mjs'), 'utf8');
 check('build replaced the version placeholder', !serverText.includes('__MOLI_VERSION__'));
 check('dist imports only local modules', !/from\s+['"]\.\.\//u.test(serverText));

@@ -65,7 +65,7 @@ dsh plugin --profile web add github:27painter/dsh-moli
 > [!IMPORTANT]
 > **The npm package is the plugin only — it does not contain the Moli engine.**
 >
-> The npm tarball contains nine JavaScript and text files and is roughly 70–80 kB. It does not include
+> The npm tarball contains ten JavaScript and text files and is roughly 70–80 kB. It does not include
 > the Codex MCP bundle, which is distributed from the repository's GitHub marketplace. `moli.exe` is a
 > separate ~101 MB compiled Rust binary, built and released by the Moli project on its own schedule.
 >
@@ -248,6 +248,9 @@ It registers four persistent tools:
 | `moli_fetch` | Fetch a page and return rendered Markdown, HTML, a selector match, or an eval result |
 | `moli_capture` | Capture a page as PNG or PDF |
 | `moli_probe` | Inspect or explicitly install the local Moli engine |
+
+The plugin's local-execution, network, proxy, cookie, TLS, and installer boundaries are documented
+in [SECURITY.md](https://github.com/27painter/dsh-moli/blob/main/SECURITY.md).
 
 The MCP server reads these optional environment variables when Codex launches it:
 
@@ -674,6 +677,13 @@ function tests using stderr text captured from real runs.
 Confirmed at runtime too: a JavaScript-rendered page (GitHub search) returned 14,560 characters of
 Markdown containing 30 real repository matches when fetched through a local proxy. A throwaway
 profile with the plugin installed composes its config with no `JsonSchemaError` and no skipped bundle.
+
+## Version 2.1.1
+
+Version 2.1.1 adds Codex plugin-directory compatibility metadata: a legacy
+`.codex-plugin/plugin.json` overlay, package-local security and license files,
+SHA-pinned Actions, Dependabot, and the HOL Plugin Scanner workflow. The MCP
+tool interface is unchanged.
 
 ## Version 2.1.0
 
