@@ -10,7 +10,7 @@ import { findMoli, moliCandidates, moliVersion, probe, runFetch } from './lib/mo
 import { MANUAL_INSTALL, installMoli } from './lib/install.js';
 
 const SERVER_NAME = 'moli';
-const SERVER_VERSION = '2.1.1';
+const SERVER_VERSION = '3.1.0';
 const DEFAULT_PROTOCOL_VERSION = '2025-06-18';
 const DEFAULT_SEARCH_URLS = [
   'https://www.bing.com/search?q={query}',

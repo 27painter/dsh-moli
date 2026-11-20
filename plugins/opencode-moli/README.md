@@ -28,7 +28,21 @@ The build copies the shared `lib/moli.js` and `lib/install.js` into
 
 ## Install
 
-Add the plugin directory to `opencode.json` or `opencode.jsonc`:
+Install the published package with OpenCode's package manager:
+
+```powershell
+opencode plugin add opencode-moli@3.1.0
+```
+
+Equivalently, add the package to `opencode.json` or `opencode.jsonc`:
+
+```json
+{
+  "plugins": ["opencode-moli@3.1.0"]
+}
+```
+
+For local development, add the plugin directory instead:
 
 ```json
 {
@@ -36,8 +50,7 @@ Add the plugin directory to `opencode.json` or `opencode.jsonc`:
 }
 ```
 
-Restart OpenCode after changing the plugin list. Once the package is published,
-the entry can be the package name instead of a path.
+Restart OpenCode if changing a local plugin does not trigger its automatic reload.
 
 ## Configuration
 

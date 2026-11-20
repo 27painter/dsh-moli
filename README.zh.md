@@ -215,6 +215,9 @@ codex plugin marketplace add 27painter/dsh-moli --ref main
 codex plugin add moli@27painter-codex
 ```
 
+Codex 不支持直接从 npm 安装插件包：`codex plugin add` 只从已配置的本地或 Git marketplace
+解析插件。因此 Codex 适配器没有单独的 `npm install` 命令。`dsh-moli` npm 包仍然只包含 DSH 文件。
+
 本地检出的仓库可以直接把目录添加为市场：
 
 ```powershell
@@ -289,7 +292,21 @@ npm run verify:codex
 npm run build:opencode
 ```
 
-然后把插件目录加入 `opencode.json` 或 `opencode.jsonc`：
+通过 OpenCode 的包管理器安装已发布的 npm 包：
+
+```powershell
+opencode plugin add opencode-moli@3.1.0
+```
+
+也可以直接写入 `opencode.json` 或 `opencode.jsonc`：
+
+```json
+{
+  "plugins": ["opencode-moli@3.1.0"]
+}
+```
+
+本地开发时，构建后改为加入插件目录：
 
 ```json
 {
@@ -642,6 +659,12 @@ dump、`eval`（含针对 `-t` 参数位置的紧超时回归防护）、PNG 与
 30 处真实结果匹配。另有一个装了本插件的一次性 profile，组合其配置时既无 `JsonSchemaError` 也无被跳过的
 bundle。
 
+## 版本 3.1.0
+
+3.1.0 新增原生 OpenCode V2 适配器。它为 OpenCode 内置的 `websearch` 工具注册免费的 `moli`
+搜索提供方，并提供 `moli_fetch`、`moli_capture` 与 `moli_probe`。DSH 与 Codex 的工具契约保持不变。
+`opencode-moli` 发布到 npm；Codex 适配器仍通过 GitHub marketplace 分发。
+
 ## 版本 2.1.1
 
 2.1.1 增加 Codex 插件目录兼容材料：旧式 `.codex-plugin/plugin.json` 兼容清单、插件目录内的
@@ -667,7 +690,7 @@ Chromium 后端、原始 CDP 逃生舱、按调用的 CDP 端点、持久化浏�
 东西"。
 
 关于这两个版本本身：npm 只允许在很短的时间窗口内撤回发布，且无法单独撤回某一个版本，因此 1.1.11 与
-1.1.12 仍然可安装，但已被标记为废弃并指向这里。`npm install dsh-moli` 会安装到 1.1.13。
+1.1.12 仍然可安装，但已被标记为废弃并指向这里。`npm install dsh-moli` 会安装当前维护版本。
 
 ## 许可
 

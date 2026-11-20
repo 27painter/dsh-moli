@@ -228,6 +228,10 @@ codex plugin marketplace add 27painter/dsh-moli --ref main
 codex plugin add moli@27painter-codex
 ```
 
+Codex does not install plugin bundles directly from npm: `codex plugin add` resolves plugins
+through a configured local or Git marketplace. There is therefore no separate `npm install`
+command for the Codex adapter. The `dsh-moli` npm package remains DSH-only by design.
+
 For a local checkout, point the marketplace at the repository directory instead:
 
 ```powershell
@@ -306,7 +310,21 @@ Build the self-contained plugin from the repository root:
 npm run build:opencode
 ```
 
-Then add the plugin directory to `opencode.json` or `opencode.jsonc`:
+Install the published npm package with OpenCode's package manager:
+
+```powershell
+opencode plugin add opencode-moli@3.1.0
+```
+
+Equivalently, add it to `opencode.json` or `opencode.jsonc`:
+
+```json
+{
+  "plugins": ["opencode-moli@3.1.0"]
+}
+```
+
+For local development, build the plugin and add the directory instead:
 
 ```json
 {
@@ -708,6 +726,13 @@ Confirmed at runtime too: a JavaScript-rendered page (GitHub search) returned 14
 Markdown containing 30 real repository matches when fetched through a local proxy. A throwaway
 profile with the plugin installed composes its config with no `JsonSchemaError` and no skipped bundle.
 
+## Version 3.1.0
+
+Version 3.1.0 adds the native OpenCode V2 adapter. It registers a keyless `moli` websearch provider
+for OpenCode's built-in `websearch` tool and exposes `moli_fetch`, `moli_capture`, and `moli_probe`.
+The DSH and Codex tool contracts are unchanged. The `opencode-moli` package is published to npm;
+the Codex adapter remains a GitHub-marketplace plugin.
+
 ## Version 2.1.1
 
 Version 2.1.1 adds Codex plugin-directory compatibility metadata: a legacy
@@ -739,7 +764,7 @@ experiment bought nothing that a parameter could not.
 
 On the versions themselves: npm allows a version to be unpublished only briefly and never
 individually, so 1.1.11 and 1.1.12 remain installable but are marked deprecated and point here.
-`npm install dsh-moli` resolves to 1.1.13.
+`npm install dsh-moli` resolves to the current maintained release.
 
 ## License
 
