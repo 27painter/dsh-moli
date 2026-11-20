@@ -32,6 +32,23 @@ JavaScript 渲染页面、搜索网页，以及生成截图或 PDF。
 
 三个适配器共用同一套浏览器核心和本机安装的 `moli` 引擎。
 
+### 为什么 DSH 少两个工具
+
+DSH 适配器只注册两个工具，Codex 与 OpenCode 注册四个。差别在宿主如何表达能力，而不在插件能做什么：
+
+- **截图与 PDF 就是 `moli_fetch`。** `moli_fetch` 本身支持 `dump` 与 `writeTo`，所以
+  `dump=screenshot`（或 `pdf`）配一个绝对路径 `writeTo` 就是完整的截图链路。Codex 与 OpenCode
+  把同一个调用另挂一个 `moli_capture` 名字，是因为它们的工具协议区分"只读 / 会写盘"，写文件的
+  工具不该共用只读那一档；DSH 的工具契约没有这个维度（只有 `isConcurrencySafe`），再加一个名字
+  只会多一份 schema、多一个让模型二选一的分叉，却换不到任何权限语义。
+- **DSH 的搜索归宿主。** DSH 自带 `web_search` 工具，底层是可插拔的 provider
+  （`ctx.web.registerSearchProvider`）。浏览器搜索在这里应该做成 provider：在设置页或
+  `DSH_WEB_SEARCH_PROVIDER` 里选择，并直接继承宿主的引用渲染、取消、错误码与会话回放。另开一个
+  `moli_search` 工具会让模型有两个搜索入口，还绕开这些机制。Codex 没有这个插槽，所以那边是工具
+  （`moli_search`）；OpenCode 的插槽就是 websearch provider，它注册的正是这个。
+
+基于 Moli 的 DSH 搜索 provider 不在本次版本范围内。
+
 ## 安装
 
 要求 Node.js `>=20.12` 和 Moli 引擎。引擎是平台相关的原生二进制，由 Moli 上游单独发布，因此不随插件打包。

@@ -32,6 +32,27 @@ For plain articles, APIs, and static HTML, the host's normal `web_fetch` is ligh
 
 All three adapters use the same browser core and the installed `moli` engine.
 
+### Why DSH exposes fewer tools
+
+The DSH adapter registers two tools where Codex and OpenCode register four. That is a difference in
+how each host represents a capability, not in what the plugin can do:
+
+- **Screenshots and PDFs are `moli_fetch`.** `moli_fetch` already takes `dump` and `writeTo`, so
+  `dump=screenshot` (or `pdf`) with an absolute `writeTo` is the whole capture path. Codex and
+  OpenCode expose the same call under a separate `moli_capture` name because their tool protocols
+  carry a read-only vs. write annotation, and a tool that writes a file should not share the
+  read-only one. DSH's tool contract has no such annotation (only `isConcurrencySafe`), so a second
+  name would add a second schema and a second choice for the model while granting nothing.
+- **Search belongs to the host on DSH.** DSH provides its own `web_search` tool over a pluggable
+  provider seam (`ctx.web.registerSearchProvider`). A browser-backed search is a provider there,
+  selected from the settings page or `DSH_WEB_SEARCH_PROVIDER`, and it inherits citation rendering,
+  cancellation, error codes, and session replay from the host. A separate `moli_search` tool would
+  give the model two search entry points and bypass those. Codex has no such seam, so the capability
+  is a tool there (`moli_search`); OpenCode's seam is a websearch provider, which is what it
+  registers.
+
+A Moli-backed DSH search provider is not part of this release.
+
 ## Install
 
 Requirements: Node.js `>=20.12` and a Moli engine. The engine is installed separately because it is a
