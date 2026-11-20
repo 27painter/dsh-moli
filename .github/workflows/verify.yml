@@ -98,6 +98,12 @@ jobs:
       - name: config-verify (settings surface, engine lifecycle, client shape)
         run: node verify/config-verify.mjs
 
+      # The usage report's two silent-wrong-answer defects: the provider order and
+      # the missing relevance check that let a swapped results page be returned as an
+      # answer. Offline -- it drives an injected expression against a fake DOM.
+      - name: search-verify (provider order, relevance guard, redirect decoding)
+        run: node verify/search-verify.mjs
+
       # The expression-builder half needs no engine; the end-to-end half skips
       # without one, so this is safe on a runner that has no moli.
       - name: scroll-verify (the scroll parameter and what it triggers)

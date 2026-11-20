@@ -51,6 +51,23 @@ const shaped = buildArgs({ url: '-o/tmp/x' });
 check('an -o-shaped url is not an output flag', shaped.at(-1) === '-o/tmp/x' && shaped.includes('--'),
   shaped.join(' '));
 
+// The proxy flag used to be appended to the finished vector, i.e. after the `--`
+// separator, where clap reads it as a second positional argument. The usage report
+// measured the consequence: `proxy` (and therefore every MOLI_PROXY / HTTPS_PROXY /
+// HTTP_PROXY / ALL_PROXY the plugin reads) did not route a call -- it made the call
+// fail with `error: unexpected argument '--http-proxy' found`. These assertions pin
+// the flag to the flag side of the separator.
+console.log('\n1c. the proxy flag rides before --, not after it');
+const proxied = buildArgs({ url: 'https://x/', dump: 'markdown', proxy: 'http://127.0.0.1:7890' });
+check('--http-proxy is present', proxied.includes('--http-proxy'), proxied.join(' '));
+check('its value is the proxy url', after(proxied, '--http-proxy') === 'http://127.0.0.1:7890');
+check('it sits before the -- separator', proxied.indexOf('--http-proxy') < proxied.indexOf('--'), proxied.join(' '));
+check('and the url is still the only positional', proxied.at(-2) === '--' && proxied.at(-1) === 'https://x/', proxied.join(' '));
+check('no proxy flag without a proxy', !buildArgs({ url: 'https://x/' }).includes('--http-proxy'));
+check('an empty proxy emits nothing', !buildArgs({ url: 'https://x/', proxy: '' }).includes('--http-proxy'));
+const proxiedHostile = buildArgs({ url: 'https://x/', dump: 'markdown', proxy: 'http://127.0.0.1:7890' });
+check('the separator stays last', proxiedHostile.indexOf('--') === proxiedHostile.length - 2, proxiedHostile.join(' '));
+
 console.log('\n2. the response waits map to their flags');
 const a = buildArgs({ url: 'https://x/', waitResponseUrl: '/api/list' });
 check('waitResponseUrl sets --wait-response-url', after(a, '--wait-response-url') === '/api/list');
@@ -83,6 +100,16 @@ if (exe === undefined) {
   console.log('  SKIP: no moli engine');
 } else {
   const run = args => tool.execute({ ...args, timeoutMs: args.timeoutMs ?? 60000 }, {});
+
+  // End-to-end half of 1c: a real engine must accept the flag where `buildArgs` put
+  // it. A dead loopback port is the probe, so this needs no network -- the call has
+  // to fail at the proxy (flag honoured) rather than at the argument parser (bug).
+  console.log('\n4a. a configured proxy reaches the engine as a flag');
+  const proxiedCall = await run({ url: 'https://example.com/', dump: 'markdown', proxy: 'http://127.0.0.1:9', timeoutMs: 25000 });
+  check('the engine did not reject the argv', !/unexpected argument/iu.test(String(proxiedCall.error ?? '')),
+    JSON.stringify(String(proxiedCall.error ?? '').slice(0, 90)));
+  check('a dead proxy fails the call instead of being ignored', proxiedCall.ok === false,
+    `ok=${String(proxiedCall.ok)}`);
   // A path that cannot exist under a domain reserved for examples. Probed against
   // several candidates: this one answers 404 with a body every time, where a random
   // site's 404 path can be a soft-404 (HTTP 200) or an unreachable host.

@@ -8,15 +8,11 @@
  */
 import { findMoli, moliCandidates, moliVersion, probe, runFetch } from './lib/moli.js';
 import { MANUAL_INSTALL, installMoli } from './lib/install.js';
+import { clampSearchLimit, parseSearchUrls, providerLabel, runSearch } from './lib/search.js';
 
 const SERVER_NAME = 'moli';
-const SERVER_VERSION = '3.1.0';
+const SERVER_VERSION = '3.2.0';
 const DEFAULT_PROTOCOL_VERSION = '2025-06-18';
-const DEFAULT_SEARCH_URLS = [
-  'https://www.bing.com/search?q={query}',
-  'https://html.duckduckgo.com/html/?q={query}',
-  'https://search.brave.com/search?q={query}',
-];
 
 function positiveInteger(value, fallback) {
   return Number.isInteger(value) && value > 0 ? value : fallback;
@@ -27,13 +23,6 @@ function envBoolean(value, fallback = false) {
   return /^(1|true|yes|on)$/iu.test(value.trim());
 }
 
-function searchUrlList() {
-  const configured = process.env.MOLI_SEARCH_URLS?.trim() || process.env.MOLI_SEARCH_URL?.trim() || '';
-  if (configured === '') return DEFAULT_SEARCH_URLS;
-  const urls = configured.split('|').map(url => url.trim()).filter(url => url !== '');
-  return urls.length > 0 ? urls : DEFAULT_SEARCH_URLS;
-}
-
 const config = {
   exePath: process.env.MOLI_BIN?.trim() || '',
   proxy: process.env.MOLI_PROXY?.trim()
@@ -41,7 +30,9 @@ const config = {
     || process.env.HTTP_PROXY?.trim()
     || process.env.ALL_PROXY?.trim()
     || '',
-  searchUrls: searchUrlList(),
+  // The provider order lives in the shared search core, so the Codex and OpenCode
+  // adapters cannot drift apart on which provider is tried first.
+  searchUrls: parseSearchUrls(process.env.MOLI_SEARCH_URLS?.trim() || process.env.MOLI_SEARCH_URL?.trim() || ''),
   defaultTimeoutMs: positiveInteger(Number(process.env.MOLI_TIMEOUT_MS), 30000),
   searchAttemptTimeoutMs: positiveInteger(Number(process.env.MOLI_SEARCH_ATTEMPT_TIMEOUT_MS), 20000),
   maxChars: positiveInteger(Number(process.env.MOLI_MAX_CHARS), 200000),
@@ -211,21 +202,6 @@ const TOOL_DEFINITIONS = [
   },
 ];
 
-function searchUrl(query, template) {
-  const encoded = encodeURIComponent(query);
-  if (template.includes('{query}')) return template.replaceAll('{query}', encoded);
-  return `${template}${template.includes('?') ? '&' : '?'}q=${encoded}`;
-}
-
-function providerLabel(url) {
-  try {
-    const parsed = new URL(url);
-    return parsed.hostname || parsed.protocol.replace(/:$/u, '') || url;
-  } catch {
-    return url;
-  }
-}
-
 function searchDiagnostics(proxy) {
   return {
     proxy: proxy === '' ? null : proxy,
@@ -233,66 +209,6 @@ function searchDiagnostics(proxy) {
     insecureTls: config.insecureTls,
     engine: cachedExe ?? null,
   };
-}
-
-function searchScript(limit) {
-  return `(() => {
-    const decodeResultUrl = href => {
-      try {
-        const parsed = new URL(href, location.href);
-        const bingTarget = parsed.searchParams.get('u');
-        if (bingTarget !== null) {
-          const base64 = (bingTarget.startsWith('a1') ? bingTarget.slice(2) : bingTarget)
-            .replace(/-/g, '+').replace(/_/g, '/');
-          const padded = base64 + '='.repeat((4 - base64.length % 4) % 4);
-          const decoded = atob(padded);
-          if (/^https?:\\/\\//i.test(decoded)) return decoded;
-        }
-        return parsed.href;
-      } catch {
-        return href;
-      }
-    };
-    const text = node => {
-      const inner = (node?.innerText ?? '').trim();
-      return inner !== '' ? inner : (node?.textContent ?? '').trim();
-    };
-    const containers = [];
-    const seenNodes = new Set();
-    for (const selector of ['li.b_algo', 'div.snippet[data-type="web"]', 'div.snippet', '[data-testid="result"]', 'article']) {
-      for (const node of document.querySelectorAll(selector)) {
-        if (!seenNodes.has(node)) {
-          seenNodes.add(node);
-          containers.push(node);
-        }
-      }
-    }
-    const candidates = containers.length > 0
-      ? containers
-      : [...document.querySelectorAll('a[href]')].filter(anchor => {
-          try {
-            const url = new URL(anchor.getAttribute('href') ?? '', location.href);
-            return /^https?:$/i.test(url.protocol) && url.hostname !== location.hostname;
-          } catch {
-            return false;
-          }
-        });
-    const seenUrls = new Set();
-    const results = candidates.map(node => {
-      const anchor = node.matches?.('a[href]') ? node : node.querySelector('h2 a, a[href]');
-      const url = decodeResultUrl(anchor?.getAttribute('href') ?? '');
-      return {
-        title: text(anchor),
-        url,
-        snippet: text(node.querySelector?.('.b_caption p, .b_lineclamp2, .b_lineclamp3, p') ?? node),
-      };
-    }).filter(item => {
-      if (item.title === '' || !/^https?:\\/\\//i.test(item.url) || seenUrls.has(item.url)) return false;
-      seenUrls.add(item.url);
-      return true;
-    }).slice(0, ${String(limit)});
-    return JSON.stringify(results);
-  })()`;
 }
 
 function missingEngine() {
@@ -331,72 +247,22 @@ function executeCapture(args) {
 }
 
 function executeSearch(args) {
-  const query = typeof args.query === 'string' ? args.query.trim() : '';
-  if (query === '') return { ok: false, error: 'query must not be empty', results: [] };
   const exe = engine();
   if (exe === undefined) return missingEngine();
-  const limit = Math.max(1, Math.min(20, positiveInteger(args.limit, 10)));
   const policy = callPolicy(args);
-  const attempts = [];
-  const attemptTimeoutMs = Math.min(policy.timeoutMs, config.searchAttemptTimeoutMs);
-  for (const template of config.searchUrls) {
-    const target = searchUrl(query, template);
-    const provider = providerLabel(template);
-    const started = Date.now();
-    const result = runFetch({
-      exe,
-      args: {
-        url: target,
-        eval: searchScript(limit),
-        wait: 'domcontentloaded',
-        delayMs: 600,
-        timeoutMs: attemptTimeoutMs,
-      },
-      maxChars: 100000,
-      proxy: policy.proxy,
-      insecureTls: policy.insecureTls,
-    });
-    const elapsedMs = Date.now() - started;
-    if (result.ok !== true) {
-      attempts.push({ provider, searchUrl: target, ok: false, count: 0, elapsedMs, error: String(result.error ?? 'unknown error') });
-      continue;
-    }
-    let results;
-    try {
-      results = JSON.parse(result.content);
-    } catch {
-      attempts.push({ provider, searchUrl: target, ok: false, count: 0, elapsedMs, error: 'the rendered search page did not produce parseable result JSON' });
-      continue;
-    }
-    if (!Array.isArray(results)) {
-      attempts.push({ provider, searchUrl: target, ok: false, count: 0, elapsedMs, error: 'the search result payload was not an array' });
-      continue;
-    }
-    attempts.push({ provider, searchUrl: target, ok: true, count: results.length, elapsedMs });
-    if (results.length === 0) continue;
-    return {
-      ok: true,
-      query,
-      provider,
-      searchUrl: target,
-      count: results.length,
-      results,
-      attempts,
-      diagnostics: searchDiagnostics(policy.proxy),
-    };
-  }
-  const diagnostics = searchDiagnostics(policy.proxy);
-  return {
-    ok: false,
-    query,
-    error: `all configured search providers failed or returned no results (${String(attempts.length)} tried)`,
-    hint: diagnostics.proxy === null
-      ? 'The host may block direct browser egress. Set MOLI_PROXY to a working forward proxy, or set MOLI_SEARCH_URLS to reachable providers separated by |.'
-      : 'Check that the configured proxy is reachable and that at least one provider page exposes ordinary result links. Try moli_fetch on an attempt searchUrl for diagnostics.',
-    results: [],
-    attempts,
-    diagnostics,
-  };
+  // The provider loop, the relevance guard, and the link decoding live in the
+  // shared search core so the Codex and OpenCode adapters answer identically.
+  const value = runSearch({
+    exe,
+    query: args.query,
+    limit: clampSearchLimit(args.limit, 10),
+    urls: config.searchUrls,
+    proxy: policy.proxy,
+    insecureTls: policy.insecureTls,
+    timeoutMs: policy.timeoutMs,
+    attemptTimeoutMs: config.searchAttemptTimeoutMs,
+  });
+  return { ...value, diagnostics: searchDiagnostics(policy.proxy) };
 }
 
 async function executeProbe(args) {
@@ -420,7 +286,10 @@ async function executeProbe(args) {
   if (args.checkHttps !== true) {
     return { installed: true, ok: true, exe, version, httpsOk: undefined, httpsOkScope: 'not checked', diagnostics: searchDiagnostics(config.proxy) };
   }
-  const result = probe(exe, 'https://example.com', config.insecureTls);
+  // The probe goes through the configured proxy, so `httpsOk` describes the path
+  // search and fetch actually take rather than a direct connection the caller
+  // cannot use.
+  const result = probe(exe, 'https://example.com', config.insecureTls, config.proxy);
   return {
     installed: true,
     ok: result.httpsOk === true,

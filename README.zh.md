@@ -84,14 +84,14 @@ Codex 收录页：[Awesome Codex Plugins](https://github.com/hashgraph-online/aw
 #### OpenCode
 
 ```powershell
-opencode plugin add opencode-moli@3.1.0
+opencode plugin add opencode-moli@3.2.0
 ```
 
 或写入 `opencode.json` / `opencode.jsonc`：
 
 ```json
 {
-  "plugins": ["opencode-moli@3.1.0"]
+  "plugins": ["opencode-moli@3.2.0"]
 }
 ```
 
@@ -139,6 +139,9 @@ moli_fetch url=https://example.com dump=pdf writeTo=/absolute/path/page.pdf
 moli_fetch url=https://example.com/missing failOnHttpError=true
 ```
 
+`writeTo` 会自动创建缺失的父目录，截图或 PDF 的落地路径不必预先存在；只有路径本身是目录、
+或目录无法创建时才会报错。
+
 ### 列表优先使用 `selector`
 
 `selector` 只返回匹配到的元素，不把整页内容交给模型：
@@ -148,7 +151,8 @@ moli_fetch url=https://example.com/feed selector=".video-card"
 ```
 
 读取搜索结果、信息流、表格和商品列表时，它通常最省 token，也最容易得到干净结果。没有匹配项会报错；
-`selector` 不能与 `dump` 或 `eval` 同时使用。
+`selector` 不能与 `dump` 或 `eval` 同时使用。实际差距很大：同一个 GitHub README 页面，整页
+markdown 为 46,305 字符，`selector="article"` 只返回 13,135 字符，同样内容少约 72%。
 
 ### 等待真正的响应
 
@@ -187,10 +191,14 @@ Codex 读取以下环境变量：
 |---|---|
 | `MOLI_BIN` | 自动探测引擎路径 |
 | `MOLI_PROXY` | 现有 `HTTPS_PROXY`、`HTTP_PROXY` 或 `ALL_PROXY` |
-| `MOLI_SEARCH_URLS` | Bing → DuckDuckGo HTML → Brave |
+| `MOLI_SEARCH_URLS` | DuckDuckGo HTML → 百度 → Bing → Brave |
 | `MOLI_TIMEOUT_MS` | `30000` |
 | `MOLI_MAX_CHARS` | `200000` |
 | `MOLI_INSECURE_TLS` | `0` |
+
+代理设置对每次 Moli 调用都生效，而不只作用于页面加载：`MOLI_PROXY`、`HTTPS_PROXY`、
+`HTTP_PROXY`、`ALL_PROXY` 以及每次调用的 `proxy` 选项覆盖 `fetch`、搜索、截图和 `probe`。
+Codex 与 OpenCode 的 `moli_probe` 还会报告已配置的搜索提供方与最终生效的代理。
 
 如果希望 Codex 默认用 Moli 搜索，把下面内容放在第一个 TOML table 之前：
 
@@ -203,6 +211,21 @@ enabled = true
 
 OpenCode 在插件项中接受对应选项，也读取相同的 `MOLI_*` 环境变量。详见
 [`plugins/opencode-moli/README.md`](plugins/opencode-moli/README.md)。
+
+## 搜索
+
+Codex 的 `moli_search` 与 OpenCode 的 `moli` 搜索提供方都用 Moli 渲染配置的公开结果页，再提取
+普通结果链接。提供方按顺序尝试：DuckDuckGo HTML、百度、Bing、Brave。搜索等待
+`domcontentloaded`；实测 DuckDuckGo HTML 约 1.0–1.2 秒返回 10 条结果。
+
+结果在采用前会做相关性校验：若某个提供方返回的标题、URL 和摘要里都没有查询词，就判为无效尝试
+（这通常是中间层把响应串成了别人的页面，或遇到反爬拦截页），换下一个提供方。全部提供方失败或
+被拒时，调用返回 `ok: false`，并附上每个提供方的 `attempts` 记录，而不是把无关结果当成功返回。
+
+结果链接会被还原：Bing 的 `u=a1...` 跳转和 DuckDuckGo 的 `/l/?uddg=` 链接会解码成真实目标
+URL；百度的 `link?url=` 链接仍需再跟一次跳转。
+
+搜索免费、无需 API Key，但结果质量和反爬行为取决于这些公开搜索页本身，而不是付费搜索 API。
 
 ## 平台支持
 
@@ -243,14 +266,18 @@ node verify/empty-verify.mjs
 
 ## 版本
 
-### 3.1.0
+### 3.2.0
 
-新增原生 OpenCode V2 适配器，包括免费搜索、`moli_fetch`、`moli_capture` 与 `moli_probe`。
-DSH 与 Codex 的工具契约保持不变。
+搜索默认顺序改为 DuckDuckGo HTML → 百度 → Bing → Brave，并等待 `domcontentloaded`。某提供方返回的
+标题、URL、摘要与查询词零命中时判为无效尝试，换下一个提供方；全部失败时返回 `ok: false` 并附每个
+提供方的 `attempts`。代理参数移到 `--` 分隔符之前，因此 `MOLI_PROXY`、`HTTPS_PROXY`、
+`HTTP_PROXY`、`ALL_PROXY` 和每次调用的 `proxy` 现在对 fetch、搜索、截图与 probe 都生效。
+`writeTo` 会自动创建缺失的父目录；`moli_probe` 会报告已配置的搜索提供方与代理状态。
 
 <details>
 <summary>更早版本</summary>
 
+- **3.1.0** — 新增原生 OpenCode V2 适配器，包括免费搜索、`moli_fetch`、`moli_capture` 与 `moli_probe`。DSH 与 Codex 的工具契约保持不变。
 - **2.1.1** — 增加 Codex 目录元数据、安全文件、固定 SHA 的 Actions 和 HOL 扫描工作流。
 - **2.1.0** — 增加 Codex MCP 适配器及 search、fetch、capture、probe 工具。
 - **1.1.11 / 1.1.12** — 已废弃，请使用当前维护版本。

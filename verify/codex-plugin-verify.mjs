@@ -65,7 +65,7 @@ check('MCP server is local stdio', mcp.mcpServers?.moli?.type === 'stdio');
 check('MCP launcher uses PLUGIN_ROOT', mcp.mcpServers?.moli?.args?.[0]?.includes('${PLUGIN_ROOT}'));
 
 console.log('\n2. build output is self-contained');
-for (const file of ['server.mjs', join('lib', 'moli.js'), join('lib', 'install.js')]) {
+for (const file of ['server.mjs', join('lib', 'moli.js'), join('lib', 'install.js'), join('lib', 'search.js')]) {
   check(`dist includes ${file}`, existsSync(join(dist, file)));
 }
 const logo = readFileSync(join(pluginRoot, 'assets', 'logo.svg'), 'utf8');
@@ -73,7 +73,7 @@ check('listing icon declares 512x512 dimensions', /<svg[^>]*\bwidth="512"[^>]*\b
 const serverText = readFileSync(join(dist, 'server.mjs'), 'utf8');
 check('build replaced the version placeholder', !serverText.includes('__MOLI_VERSION__'));
 check('dist imports only local modules', !/from\s+['"]\.\.\//u.test(serverText));
-for (const file of ['moli.js', 'install.js']) {
+for (const file of ['moli.js', 'install.js', 'search.js']) {
   const source = readFileSync(join(repo, 'lib', file));
   const built = readFileSync(join(dist, 'lib', file));
   check(`dist core is current: ${file}`, source.equals(built), 'run npm run build:codex');
@@ -86,11 +86,20 @@ const exe = findMoli();
 
 console.log('\n3. MCP stdio handshake and tool catalog');
 const verifyLiveSearch = process.env.MOLI_VERIFY_SEARCH === '1';
+// Offline search fixtures. They encode the usage report's finding in three pages:
+// a provider that answers with somebody else's results (the middlebox / anti-bot
+// case), a provider that honestly has no results, and a provider that answers the
+// question. The search must reject the first, skip the second, and return the third
+// -- with all three attempts recorded. Every result title carries a query term,
+// because a result set with no query terms in it is now refused by design.
+const fixtureUnrelatedSearchUrl = `data:text/html,${encodeURIComponent(
+  '<html><body><span>{query}</span><li class="b_algo"><h2><a href="https://deloitte.example/login">Deloitte - Sign in to your account</a></h2><p>Sign in to your account to continue</p></li></body></html>',
+)}`;
 const fixtureEmptySearchUrl = `data:text/html,${encodeURIComponent(
-  '<html><body><span>{query}</span><p>No results fixture</p></body></html>',
+  '<html><body><span>{query}</span><p>No results found for this fixture</p></body></html>',
 )}`;
 const fixtureSearchUrl = `data:text/html,${encodeURIComponent(
-  '<html><body><span>{query}</span><li class="b_algo"><h2><a href="https://example.com/result">Example Result</a></h2><p>Example snippet</p></li></body></html>',
+  '<html><body><span>{query}</span><li class="b_algo"><h2><a href="https://example.com/result">Offline fixture result</a></h2><p>Example snippet about the offline fixture</p></li></body></html>',
 )}`;
 const child = spawn(process.execPath, [join(dist, 'server.mjs')], {
   cwd: pluginRoot,
@@ -98,7 +107,7 @@ const child = spawn(process.execPath, [join(dist, 'server.mjs')], {
   windowsHide: true,
   env: {
     ...process.env,
-    ...(verifyLiveSearch ? {} : { MOLI_SEARCH_URLS: `${fixtureEmptySearchUrl}|${fixtureSearchUrl}` }),
+    ...(verifyLiveSearch ? {} : { MOLI_SEARCH_URLS: `${fixtureUnrelatedSearchUrl}|${fixtureEmptySearchUrl}|${fixtureSearchUrl}` }),
   },
 });
 let stdout = '';
@@ -228,8 +237,18 @@ try {
         arguments: { query: 'offline fixture', limit: 5 },
       }, 60000);
       const value = searched.result?.structuredContent;
-      check('moli_search falls back after an empty provider', value?.ok === true && value?.attempts?.length === 2, String(value?.error ?? ''));
-      check('moli_search returns a structured result', value?.results?.[0]?.title === 'Example Result' && value?.results?.[0]?.url === 'https://example.com/result');
+      check('moli_search falls through an unrelated and an empty provider', value?.ok === true && value?.attempts?.length === 3,
+        String(value?.error ?? ''));
+      // The report's headline failure: a provider answered 200 with somebody else's
+      // page, the plugin counted it as success, and the caller was handed unrelated
+      // results. The first fixture does exactly that, so a search that returns here
+      // proves the page was rejected rather than returned.
+      check('the unrelated provider is rejected for relevance', value?.attempts?.[0]?.rejected === true && value?.attempts?.[0]?.ok === false,
+        JSON.stringify(value?.attempts?.[0]?.error ?? '').slice(0, 80));
+      check('the related provider answers instead', value?.provider === 'data');
+      check('moli_search returns the related structured result',
+        value?.results?.[0]?.title === 'Offline fixture result' && value?.results?.[0]?.url === 'https://example.com/result',
+        JSON.stringify(value?.results?.[0] ?? null).slice(0, 80));
     }
   } else if (exe === undefined) {
     skipped('moli_search live provider check', 'no Moli engine installed');

@@ -35,7 +35,7 @@ if (pluginPackage.dependencies?.['@opencode/plugin'] === undefined) {
 rmSync(dist, { recursive: true, force: true });
 mkdirSync(join(dist, 'lib'), { recursive: true });
 
-for (const file of ['moli.js', 'install.js']) {
+for (const file of ['moli.js', 'install.js', 'search.js']) {
   const source = join(repo, 'lib', file);
   if (!existsSync(source)) throw new Error(`missing shared core file: ${source}`);
   copyFileSync(source, join(dist, 'lib', file));
@@ -46,7 +46,7 @@ const adapter = adapterSource.replaceAll('__MOLI_VERSION__', pkg.version);
 if (adapter.includes('__MOLI_VERSION__')) throw new Error('adapter version placeholder was not replaced');
 writeFileSync(join(dist, 'index.js'), adapter);
 
-for (const file of ['index.js', join('lib', 'moli.js'), join('lib', 'install.js')]) {
+for (const file of ['index.js', join('lib', 'moli.js'), join('lib', 'install.js'), join('lib', 'search.js')]) {
   execFileSync(process.execPath, ['--check', join(dist, file)], { stdio: 'inherit' });
 }
 
@@ -61,3 +61,4 @@ console.log(`Built OpenCode plugin ${pluginPackage.name}@${pluginPackage.version
 console.log(`  ${relative(repo, join(dist, 'index.js'))}`);
 console.log(`  ${relative(repo, join(dist, 'lib', 'moli.js'))}`);
 console.log(`  ${relative(repo, join(dist, 'lib', 'install.js'))}`);
+console.log(`  ${relative(repo, join(dist, 'lib', 'search.js'))}`);

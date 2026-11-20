@@ -15,13 +15,9 @@
 import { Plugin } from '@opencode/plugin'
 import { MANUAL_INSTALL, installMoli } from './lib/install.js'
 import { findMoli, moliCandidates, probe, runFetch } from './lib/moli.js'
+import { clampSearchLimit, parseSearchUrls, providerLabel, runSearch } from './lib/search.js'
 
-const SERVER_VERSION = '3.1.0'
-const DEFAULT_SEARCH_URLS = [
-  'https://www.bing.com/search?q={query}',
-  'https://html.duckduckgo.com/html/?q={query}',
-  'https://search.brave.com/search?q={query}',
-]
+const SERVER_VERSION = '3.2.0'
 
 const DEFAULTS = {
   defaultTimeoutMs: 30000,
@@ -51,13 +47,11 @@ function envString(name) {
 
 function searchUrlList(options) {
   const configured = Array.isArray(options.searchUrls)
-    ? options.searchUrls.filter(url => typeof url === 'string' && url.trim() !== '').map(url => url.trim())
-    : []
-  if (configured.length > 0) return configured
-  const env = envString('MOLI_SEARCH_URLS') || envString('MOLI_SEARCH_URL')
-  if (env === '') return DEFAULT_SEARCH_URLS
-  const urls = env.split('|').map(url => url.trim()).filter(url => url !== '')
-  return urls.length > 0 ? urls : DEFAULT_SEARCH_URLS
+    ? options.searchUrls
+    : (envString('MOLI_SEARCH_URLS') || envString('MOLI_SEARCH_URL'));
+  // The default order is the shared search core's, so this adapter cannot drift
+  // from the Codex one on which provider is tried first.
+  return parseSearchUrls(configured);
 }
 
 function readConfig(options) {
@@ -176,93 +170,6 @@ const PROBE_INPUT_SCHEMA = {
   },
 }
 
-/** Read a value from a URL's search result page. Kept in sync with the Codex adapter. */
-function searchScript(limit) {
-  return `(() => {
-    const decodeResultUrl = href => {
-      try {
-        const parsed = new URL(href, location.href);
-        const bingTarget = parsed.searchParams.get('u');
-        if (bingTarget !== null) {
-          const base64 = (bingTarget.startsWith('a1') ? bingTarget.slice(2) : bingTarget)
-            .replace(/-/g, '+').replace(/_/g, '/');
-          const padded = base64 + '='.repeat((4 - base64.length % 4) % 4);
-          const decoded = atob(padded);
-          if (/^https?:\\/\\//i.test(decoded)) return decoded;
-        }
-        return parsed.href;
-      } catch {
-        return href;
-      }
-    };
-    const text = node => {
-      const inner = (node?.innerText ?? '').trim();
-      return inner !== '' ? inner : (node?.textContent ?? '').trim();
-    };
-    const clean = value => value
-      .replace(/https?:\\/\\/\\S+/giu, '')
-      .replace(/\\s+/gu, ' ')
-      .replace(/\\s*Read more\\s*$/iu, '')
-      .trim();
-    const noResults = /There are no results|did not match any documents|No results found|No results for/iu.test(document.body.innerText);
-    if (noResults) return JSON.stringify([]);
-    const selectors = ['li.b_algo', 'div.snippet[data-type="web"]', 'div.snippet', 'div.result', 'div.web-result', '[data-testid="result"]'];
-    // Brave wraps results in <article>. Bing also uses <article> for unrelated
-    // top-story cards when a query has no results, so scope that selector to the
-    // engine that means it instead of returning news as search hits.
-    if (/search\\.brave\\.com$/iu.test(location.hostname)) selectors.push('article');
-    const containers = [];
-    const seenNodes = new Set();
-    for (const selector of selectors) {
-      for (const node of document.querySelectorAll(selector)) {
-        if (!seenNodes.has(node)) {
-          seenNodes.add(node);
-          containers.push(node);
-        }
-      }
-    }
-    const candidates = containers.length > 0
-      ? containers
-      : [...document.querySelectorAll('a[href]')].filter(anchor => {
-          try {
-            const url = new URL(anchor.getAttribute('href') ?? '', location.href);
-            return /^https?:$/i.test(url.protocol) && url.hostname !== location.hostname;
-          } catch {
-            return false;
-          }
-        });
-    const seenUrls = new Set();
-    const results = candidates.map(node => {
-      const anchor = node.matches?.('a[href]') ? node : node.querySelector('h2 a, a.result__a, a[href]');
-      const url = decodeResultUrl(anchor?.getAttribute('href') ?? '');
-      return {
-        title: clean(text(node.querySelector?.('h2') ?? anchor)),
-        url,
-        snippet: clean(text(node.querySelector?.('.result__snippet, .b_caption p, .b_lineclamp2, .b_lineclamp3, p') ?? node)),
-      };
-    }).filter(item => {
-      if (item.title === '' || !/^https?:\\/\\//i.test(item.url) || seenUrls.has(item.url)) return false;
-      seenUrls.add(item.url);
-      return true;
-    }).slice(0, ${String(limit)});
-    return JSON.stringify(results);
-  })()`
-}
-
-function searchUrl(query, template) {
-  const encoded = encodeURIComponent(query)
-  if (template.includes('{query}')) return template.replaceAll('{query}', encoded)
-  return `${template}${template.includes('?') ? '&' : '?'}q=${encoded}`
-}
-
-function providerLabel(url) {
-  try {
-    return new URL(url).hostname || url
-  } catch {
-    return url
-  }
-}
-
 function missingEngine() {
   return {
     ok: false,
@@ -329,6 +236,13 @@ function renderProbeValue(value) {
     `${String(value.version).startsWith('moli') ? String(value.version) : `moli ${String(value.version)}`} at ${String(value.exe)}`,
     value.httpsOk === true ? 'HTTPS fetch works from this process.' : `HTTPS fetch failed: ${String(value.detail)}`,
   ]
+  // Which providers a search will try, and whether that path goes through a proxy,
+  // is the part of the setup a failing search depends on -- so the probe states
+  // both instead of leaving the caller to infer them from a timeout.
+  if (Array.isArray(value.searchProviders) && value.searchProviders.length > 0) {
+    lines.push(`Search providers, in order: ${value.searchProviders.join(' → ')}`)
+  }
+  lines.push(`Proxy: ${typeof value.proxy === 'string' && value.proxy !== '' ? value.proxy : 'not configured (direct)'}`)
   if (value.revocationBlock === true) {
     lines.push('The certificate-revocation responder is unreachable through this network; insecureTls already relaxes that check.')
   }
@@ -365,62 +279,22 @@ export default Plugin.define({
     }
 
     const executeSearch = (query, args = {}, signal) => {
-      const trimmed = typeof query === 'string' ? query.trim() : ''
-      if (trimmed === '') return { ok: false, error: 'query must not be empty', results: [] }
       const exe = engine()
       if (exe === undefined) return missingEngine()
-      const limit = Math.max(1, Math.min(20, positiveInteger(args.limit, config.searchLimit)))
       const settings = policy(args)
-      const attempts = []
-      const attemptTimeoutMs = Math.min(settings.timeoutMs, config.searchAttemptTimeoutMs)
-      for (const template of config.searchUrls) {
-        if (signal?.aborted === true) return { ok: false, error: 'search aborted', results: [] }
-        const target = searchUrl(trimmed, template)
-        const provider = providerLabel(template)
-        const started = Date.now()
-        const result = runFetch({
-          exe,
-          args: {
-            url: target,
-            eval: searchScript(limit),
-            wait: 'domcontentloaded',
-            delayMs: 600,
-            timeoutMs: attemptTimeoutMs,
-          },
-          maxChars: 100000,
-          proxy: settings.proxy,
-          insecureTls: settings.insecureTls,
-        })
-        const elapsedMs = Date.now() - started
-        if (result.ok !== true) {
-          attempts.push({ provider, searchUrl: target, ok: false, count: 0, elapsedMs, error: String(result.error ?? 'unknown error') })
-          continue
-        }
-        let results
-        try {
-          results = JSON.parse(result.content)
-        } catch {
-          attempts.push({ provider, searchUrl: target, ok: false, count: 0, elapsedMs, error: 'the rendered search page did not produce parseable result JSON' })
-          continue
-        }
-        if (!Array.isArray(results)) {
-          attempts.push({ provider, searchUrl: target, ok: false, count: 0, elapsedMs, error: 'the search result payload was not an array' })
-          continue
-        }
-        attempts.push({ provider, searchUrl: target, ok: true, count: results.length, elapsedMs })
-        if (results.length === 0) continue
-        return { ok: true, query: trimmed, provider, searchUrl: target, count: results.length, results, attempts }
-      }
-      return {
-        ok: false,
-        query: trimmed,
-        error: `all configured search providers failed or returned no results (${String(attempts.length)} tried)`,
-        hint: config.proxy === ''
-          ? 'The host may block direct browser egress. Set the plugin option `proxy`, or set MOLI_SEARCH_URLS to reachable providers separated by |.'
-          : 'Check that the configured proxy is reachable and that at least one provider page exposes ordinary result links. Try moli_fetch on an attempt searchUrl for diagnostics.',
-        results: [],
-        attempts,
-      }
+      // Provider order, the relevance guard, and redirect decoding come from the
+      // shared search core, so this adapter answers exactly like the Codex one.
+      return runSearch({
+        exe,
+        query,
+        limit: clampSearchLimit(args.limit, config.searchLimit),
+        urls: config.searchUrls,
+        proxy: settings.proxy,
+        insecureTls: settings.insecureTls,
+        timeoutMs: settings.timeoutMs,
+        attemptTimeoutMs: config.searchAttemptTimeoutMs,
+        isAborted: () => signal?.aborted === true,
+      })
     }
 
     await ctx.websearch.transform((editor) => {
@@ -493,9 +367,18 @@ export default Plugin.define({
           }
           const exe = engine()
           if (exe === undefined) {
-            return { content: renderProbeValue({ installed: false, detail: 'moli not found. Re-run with action "install" to download it.' }) }
+            return {
+              content: renderProbeValue({
+                installed: false,
+                searchProviders: config.searchUrls.map(providerLabel),
+                proxy: config.proxy,
+                detail: 'moli not found. Re-run with action "install" to download it.',
+              }),
+            }
           }
-          const result = probe(exe, 'https://example.com', config.insecureTls)
+          // Probed through the configured proxy, so the reported HTTPS result
+          // describes the path search and fetch actually take.
+          const result = probe(exe, 'https://example.com', config.insecureTls, config.proxy)
           return {
             content: renderProbeValue({
               installed: true,
@@ -504,6 +387,8 @@ export default Plugin.define({
               httpsOk: result.httpsOk,
               detail: result.detail,
               revocationBlock: result.revocationBlock,
+              searchProviders: config.searchUrls.map(providerLabel),
+              proxy: config.proxy,
             }),
           }
         },

@@ -436,7 +436,10 @@ export function apply(ctx, config) {
       if (exe === undefined) {
         return { installed: false, detail: 'moli not found. Re-run with action "install" to download it.', manualInstall: MANUAL_INSTALL };
       }
-      const result = probe(exe, 'https://example.com', insecureTls);
+      // Probed through the configured proxy, so the reported HTTPS result describes
+      // the path moli_fetch actually takes rather than a direct connection the
+      // caller may not have.
+      const result = probe(exe, 'https://example.com', insecureTls, proxy);
       return {
         installed: true,
         exe: result.exe,

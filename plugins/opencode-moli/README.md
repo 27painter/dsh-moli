@@ -11,9 +11,11 @@ It uses the same browser core as the DSH and Codex adapters in this repository.
 - Three tools in the `moli` namespace:
   - `moli_fetch` — rendered Markdown, HTML, a semantic tree, a CSS-selector
     match, a JavaScript expression result, or a JSON envelope.
-  - `moli_capture` — a PNG screenshot or PDF written to an explicit path.
+  - `moli_capture` — a PNG screenshot or PDF written to an explicit path. Missing
+    parent directories are created.
   - `moli_probe` — inspect the local executable, or install the official Moli
-    release with `action: "install"`.
+    release with `action: "install"`. It also reports the configured search
+    providers and the proxy state.
 
 ## Build
 
@@ -23,7 +25,7 @@ From the repository root:
 npm run build:opencode
 ```
 
-The build copies the shared `lib/moli.js` and `lib/install.js` into
+The build copies the shared `lib/moli.js`, `lib/install.js`, and `lib/search.js` into
 `plugins/opencode-moli/dist/lib`, so the package is self-contained.
 
 ## Install
@@ -31,14 +33,14 @@ The build copies the shared `lib/moli.js` and `lib/install.js` into
 Install the published package with OpenCode's package manager:
 
 ```powershell
-opencode plugin add opencode-moli@3.1.0
+opencode plugin add opencode-moli@3.2.0
 ```
 
 Equivalently, add the package to `opencode.json` or `opencode.jsonc`:
 
 ```json
 {
-  "plugins": ["opencode-moli@3.1.0"]
+  "plugins": ["opencode-moli@3.2.0"]
 }
 ```
 
@@ -75,8 +77,8 @@ The object form passes plugin options:
 | Option | Default | Meaning |
 |---|---|---|
 | `exePath` | auto-detected | Absolute path to the Moli executable |
-| `proxy` | `MOLI_PROXY`, `HTTPS_PROXY`, `HTTP_PROXY`, or `ALL_PROXY` | Forward proxy for search and fetch calls |
-| `searchUrls` | Bing → DuckDuckGo HTML → Brave | Search URL templates containing `{query}` |
+| `proxy` | `MOLI_PROXY`, `HTTPS_PROXY`, `HTTP_PROXY`, or `ALL_PROXY` | Forward proxy for every Moli call: fetch, search, capture, and probe |
+| `searchUrls` | DuckDuckGo HTML → Baidu → Bing → Brave | Search URL templates containing `{query}` |
 | `searchLimit` | `10` | Maximum results per search (capped at 20) |
 | `searchAttemptTimeoutMs` | `20000` | Deadline for each fallback provider |
 | `defaultTimeoutMs` | `30000` | Default page-readiness timeout |
@@ -92,10 +94,22 @@ Environment variables with the same names as the Codex adapter are also read:
 ## Search behavior
 
 `moli` renders the configured search page with Moli and extracts the ordinary
-result links. It tries each provider until one returns at least one structured
-result; an empty or "no results" page falls through to the next provider. This is
-free and keyless, but the result quality and anti-bot behavior are those of the
-public search pages, not a paid search API.
+result links. Providers default to DuckDuckGo HTML → Baidu → Bing → Brave and are
+tried in order, waiting for `domcontentloaded`; DuckDuckGo HTML returned ten
+results in about 1.0–1.2 seconds in testing. An empty or "no results" page falls
+through to the next provider.
+
+Results are also checked for relevance: when none of the titles, URLs, or
+snippets contains a query term, the attempt is treated as invalid — a mixed-up
+intermediate response or an anti-bot page looks exactly like that — and the next
+provider is tried. If every provider fails or is rejected, the call returns
+`ok: false` with an `attempts` record per provider instead of unrelated results.
+
+Bing's `u=a1...` redirects and DuckDuckGo's `/l/?uddg=` links are decoded to the
+real target URL. Baidu's `link?url=` links still need one more redirect hop.
+
+This is free and keyless, but the result quality and anti-bot behavior are those
+of the public search pages, not a paid search API.
 
 ## Security
 

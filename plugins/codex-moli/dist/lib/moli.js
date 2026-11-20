@@ -15,7 +15,7 @@
  */
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { closeSync, existsSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -335,7 +335,13 @@ export function isSandboxTlsFailure(message) {
  */
 export function isUnreachableFailure(message) {
   const text = String(message);
-  const connectFailure = /Failed to connect|Could not connect|Connection was reset|Connection refused/iu.test(text);
+  // "Empty reply from server" (curl 52) belongs here: the host accepted the
+  // connection and then answered nothing. Measured on this machine behind a TUN
+  // accelerator, an unroutable address (http://10.255.255.1/) reports exactly that
+  // instead of a timeout, and it used to fall through to the generic "run
+  // moli_probe to confirm the install" hint -- sending the caller to re-check an
+  // installation that was never the problem.
+  const connectFailure = /Failed to connect|Could not connect|Connection was reset|Connection refused|Empty reply from server|Server returned nothing/iu.test(text);
   const anyTimeout = /Timeout was reached|readiness timed out/iu.test(text);
   const conditionTimedOut = /readiness timed out .*?while waiting for (?:a selector|a script|a subresource response)/iu.test(text);
   return {
@@ -350,7 +356,21 @@ export function isUnreachableFailure(message) {
 /**
  * Run one `moli` invocation and return its stdout as bytes plus its stderr as text.
  *
- * @param options - executable path, argv, timeout, and optional proxy.
+ * The argv must arrive complete. Flags are NOT assembled here any more, and that is
+ * the fix for the proxy bug the usage report found:
+ *
+ *     moli fetch -d markdown -- <url> --http-proxy http://127.0.0.1:7890
+ *     error: unexpected argument '--http-proxy' found
+ *
+ * `buildArgs` puts the caller's URL after `--` so that a URL beginning with `-` stays
+ * a value instead of becoming a flag (see its comment). Anything appended to the END
+ * of that vector is therefore on the positional side of the separator, where clap
+ * refuses it. `runOnce` used to append `--http-proxy` there, so setting any of
+ * `MOLI_PROXY` / `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` did not route the call
+ * through the proxy -- it made every call error out. The flag now lives in
+ * `buildArgs`, on the flag side of the separator, where a caller can assert it.
+ *
+ * @param options - executable path and the complete argv tail.
  * @returns the settled outcome; never throws for a non-zero exit.
  */
 export function runOnce(options) {
@@ -362,12 +382,7 @@ export function runOnce(options) {
   try {
     outFd = openSync(outPath, 'w');
     errFd = openSync(errPath, 'w');
-    const spawnArgs = [...options.args];
-    if (options.timeoutMs !== undefined) spawnArgs.push('-t', String(options.timeoutMs));
-    if (options.proxy !== undefined && options.proxy !== '') {
-      spawnArgs.push('--http-proxy', options.proxy);
-    }
-    const result = spawnSync(options.exe, spawnArgs, {
+    const result = spawnSync(options.exe, options.args, {
       stdio: ['ignore', outFd, errFd],
       // Cancellation backstop, not the engine's readiness deadline: it must sit
       // above the `-t` value handed to moli, or the process is killed before it
@@ -451,8 +466,14 @@ export function buildArgs(args) {
   // asked for. The engine says as much in its own error ("to pass '--not-a-flag' as
   // a value, use '-- --not-a-flag'"). Flags therefore have to be pushed first and the
   // positional argument appended at the end, which is why the URL is not argv[1].
+  //
+  // That rule is also why `--http-proxy` lives here and not in `runOnce`: appending
+  // it after `--` made clap read the proxy URL as a second positional argument and
+  // reject the whole call ("unexpected argument '--http-proxy' found"), so setting a
+  // proxy broke every fetch instead of routing it.
   const argv = ['fetch'];
 
+  if (args.proxy !== undefined && args.proxy !== '') argv.push('--http-proxy', String(args.proxy));
   if (args.dump !== undefined) argv.push('-d', args.dump);
   // Screenshots and PDFs silently produce nothing without the layout renderer.
   if (needsLayout) argv.push('--layout');
@@ -501,9 +522,16 @@ export function buildArgs(args) {
 export function runFetch(options) {
   // The configured no-verify default applies only when the call stays silent;
   // an explicit false still means "verify fully".
-  const args = options.insecureTls === true && options.args.insecureTls === undefined
+  const baseArgs = options.insecureTls === true && options.args.insecureTls === undefined
     ? { ...options.args, insecureTls: true }
     : options.args;
+  // The proxy is resolved by the adapter (per call, then the plugin configuration,
+  // then the environment) and arrives as `options.proxy`. Folding it into the
+  // argument set is what lets `buildArgs` put the flag on the flag side of the `--`
+  // separator; appending it to the finished argv is the bug this release fixes.
+  const args = options.proxy === undefined || options.proxy === ''
+    ? baseArgs
+    : { ...baseArgs, proxy: String(options.proxy) };
   // `selector` replaces the whole-page output, so combining it with either reader is a
   // call that cannot do what it says: one of the two would be silently ignored. That
   // is the failure mode this plugin keeps having to fix, so it is refused up front and
@@ -543,11 +571,29 @@ export function runFetch(options) {
     };
   }
 
+  // Settle the destination before spending a fetch. The engine writes binary output
+  // to stdout and this plugin writes the file, so the path is only this side's
+  // problem -- and a typo in it should fail in milliseconds instead of after a full
+  // render. A missing parent directory is created rather than refused: the caller
+  // named where the artifact belongs, and the usage report's friction was having to
+  // create `C:\temp` by hand before a PDF could land.
+  const writeFailure = typeof args.writeTo === 'string' && args.writeTo !== ''
+    ? ensureWritable(args.writeTo)
+    : undefined;
+  if (writeFailure !== undefined) {
+    return {
+      ok: false,
+      url: args.url,
+      error: writeFailure,
+      sandboxTlsBlock: false,
+      hint: 'Pass an absolute path whose parent directory can be created, or read the result inline instead of using writeTo.',
+    };
+  }
+
   const outcome = fetchOnce({
     exe: options.exe,
     args: argv,
     timeoutMs,
-    proxy: options.proxy,
   });
 
   const bytes = outcome.stdout.length;
@@ -603,11 +649,10 @@ export function runFetch(options) {
     // which is the fallback when the reason wording changes.
     const reported = httpStatusFrom(stderr);
     if (isBinary) {
-      const failure = ensureWritable(args.writeTo);
-      if (failure !== undefined) {
-        return { ok: false, url: args.url, httpError: true, error: failure, hint: 'Pass an absolute path in an existing directory.' };
+      const writeFailure = writeOutput(args.writeTo, outcome.stdout);
+      if (writeFailure !== undefined) {
+        return { ok: false, url: args.url, httpError: true, error: writeFailure, hint: 'Pass an absolute path whose parent directory can be created.' };
       }
-      writeFileSync(args.writeTo, outcome.stdout);
       return {
         ok: false,
         url: args.url,
@@ -693,10 +738,6 @@ export function runFetch(options) {
   }
 
   if (isBinary) {
-    const failure = ensureWritable(args.writeTo);
-    if (failure !== undefined) {
-      return { ok: false, url: args.url, error: failure, sandboxTlsBlock: false, hint: 'Pass an absolute path in an existing directory.' };
-    }
     // A binary dump produces nothing for an HTTP error: the engine exits 1 before
     // rendering anything, unlike the text dumps which exit 22 with the body kept.
     // Nothing is written, so say that rather than leaving an empty file behind.
@@ -711,7 +752,10 @@ export function runFetch(options) {
         hint: 'The engine could not render this page, so no file was written. A text dump (markdown, html or json) still captures an HTTP error body; binary output does not.',
       };
     }
-    writeFileSync(args.writeTo, outcome.stdout);
+    const writeFailure = writeOutput(args.writeTo, outcome.stdout);
+    if (writeFailure !== undefined) {
+      return { ok: false, url: args.url, error: writeFailure, sandboxTlsBlock: false, hint: 'Pass an absolute path whose parent directory can be created.' };
+    }
     return {
       ok: true,
       url: args.url,
@@ -799,11 +843,10 @@ export function runFetch(options) {
     };
   }
   if (args.writeTo !== undefined && args.writeTo !== '') {
-    const failure = ensureWritable(args.writeTo);
-    if (failure !== undefined) {
-      return { ok: false, url: args.url, error: failure, sandboxTlsBlock: false, hint: 'Pass an absolute path in an existing directory.' };
+    const writeFailure = writeOutput(args.writeTo, outcome.stdout);
+    if (writeFailure !== undefined) {
+      return { ok: false, url: args.url, error: writeFailure, sandboxTlsBlock: false, hint: 'Pass an absolute path whose parent directory can be created.' };
     }
-    writeFileSync(args.writeTo, outcome.stdout);
     return {
       ok: true,
       url: args.url,
@@ -933,16 +976,29 @@ function parseStatus(text) {
 }
 
 /**
- * Check that an output path can be created before the engine runs.
+ * Settle an output path before the engine runs, creating a missing parent directory.
+ *
+ * Refusing a path whose directory does not exist yet made the caller create it by
+ * hand first -- the one friction the usage report named for screenshots and PDFs
+ * ("`capture` 必须给绝对路径 `writeTo`，不会自动落到临时目录，写文件前要自己确保目录
+ * 存在"). The caller has already said where the artifact belongs, so creating that
+ * directory is part of honouring the request; a path that is itself a directory, or
+ * one whose parent cannot be created, is still an error.
  *
  * @param path - requested destination path.
- * @returns an error message, or undefined when the path looks usable.
+ * @returns an error message, or undefined when the path is usable.
  */
 function ensureWritable(path) {
-  const parent = dirname(path);
-  if (!existsSync(parent)) return `destination directory does not exist: ${parent}`;
+  if (typeof path !== 'string' || path === '') return 'writeTo must be a non-empty path';
   if (existsSync(path) && !statIsFile(path)) return `destination is not a regular file: ${path}`;
-  return undefined;
+  const parent = dirname(path);
+  if (existsSync(parent)) return undefined;
+  try {
+    mkdirSync(parent, { recursive: true });
+  } catch (error) {
+    return `destination directory could not be created: ${parent} (${String(error?.code ?? error?.message ?? error)})`;
+  }
+  return existsSync(parent) ? undefined : `destination directory could not be created: ${parent}`;
 }
 
 /**
@@ -960,16 +1016,46 @@ function statIsFile(path) {
 }
 
 /**
+ * Write the engine's stdout bytes to a destination that was already settled.
+ *
+ * `ensureWritable` ran before the fetch, so a failure here is a real filesystem
+ * fault (a permission change, or something created at that path meanwhile) rather
+ * than a caller mistake. Reporting it keeps the tool result a value instead of an
+ * exception thrown out of the call.
+ *
+ * @param path - destination path.
+ * @param bytes - the engine's stdout.
+ * @returns an error message, or undefined on success.
+ */
+function writeOutput(path, bytes) {
+  try {
+    writeFileSync(path, bytes);
+    return undefined;
+  } catch (error) {
+    return `output could not be written to ${path} (${String(error?.code ?? error?.message ?? error)})`;
+  }
+}
+
+/**
  * Report whether the engine exists and can reach HTTPS from this process.
  *
  * @param exe - absolute path to `moli.exe`.
  * @param probeUrl - an HTTPS URL to fetch in text mode.
+ * @param insecureTls - pass the engine's no-verify flag.
+ * @param proxy - forward proxy to probe through, if one is configured. A probe that
+ *   bypasses the proxy the real calls use reports a network the caller is not on.
  * @returns the diagnostic value.
  */
-export function probe(exe, probeUrl, insecureTls = false) {
+export function probe(exe, probeUrl, insecureTls = false, proxy = undefined) {
   const version = moliVersion(exe);
-  const probeArgs = ['fetch', probeUrl, '-d', 'markdown'];
-  if (insecureTls) probeArgs.push('--insecure-disable-tls-host-verification');
+  // Built by the same function as every other fetch, so the probe exercises the
+  // same flag placement -- including `--http-proxy` before the `--` separator.
+  const probeArgs = buildArgs({
+    url: probeUrl,
+    dump: 'markdown',
+    ...(insecureTls === true ? { insecureTls: true } : {}),
+    ...(proxy === undefined || proxy === '' ? {} : { proxy }),
+  });
   const outcome = fetchOnce({ exe, args: probeArgs, timeoutMs: 20000 });
   const stderr = outcome.spawnError === undefined ? outcome.stderr : `${outcome.spawnError} | ${outcome.stderr}`;
   // A zero exit means moli reached the host and fetched it. Requiring non-empty
