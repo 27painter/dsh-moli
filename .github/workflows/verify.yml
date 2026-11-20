@@ -57,6 +57,12 @@ jobs:
       - name: Codex plugin verify
         run: npm run verify:codex
 
+      # The OpenCode adapter is a separate self-contained bundle built from the
+      # same core. Its build script syntax-checks the output and validates every
+      # relative import, so a broken copy fails here instead of at plugin load.
+      - name: OpenCode plugin build
+        run: npm run build:opencode
+
       # schema-verify imports the registry's own validator out of the DSH install
       # (`@deepseek-ai/dsh-tools`), because the plain `ctx.tools.register` path is
       # where two registration failures shipped from. It is not a dependency of the

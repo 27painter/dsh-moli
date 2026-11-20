@@ -6,8 +6,9 @@
 [![HOL 信任分](https://img.shields.io/endpoint?url=https%3A%2F%2Fhol.org%2Fapi%2Fregistry%2Fbadges%2Fplugin%3Fslug%3D27painter%252Fmoli%26metric%3Dtrust%26style%3Dfor-the-badge)](https://hol.org/registry/plugins/27painter%2Fmoli)
 [![已收录于 Awesome Codex Plugins](https://img.shields.io/badge/Awesome_Codex_Plugins-%E5%B7%B2%E6%94%B6%E5%BD%95-3964fe)](https://github.com/hashgraph-online/awesome-codex-plugins)
 
-**一个同时服务 DeepSeek Harness 与 Codex 的本地 Moli 浏览器桥。** DSH 获得两个工具；同一个仓库还提供
-常驻 Codex MCP 插件。两者都封装 [Moli](https://github.com/lexmount/moli)——一个专为 AI agent 打造的
+**一个同时服务 DeepSeek Harness、Codex 与 OpenCode 的本地 Moli 浏览器桥。** DSH 获得两个工具；
+同一个仓库还提供常驻 Codex MCP 插件与原生 OpenCode V2 插件。它们都封装
+[Moli](https://github.com/lexmount/moli)——一个专为 AI agent 打造的
 Rust 无头浏览器——所以 agent 能看到那些"必须跑完 JavaScript 才存在"的页面内容，也能搜索网页、截图或生成 PDF。
 
 [English](README.md) | 中文
@@ -275,6 +276,30 @@ npm run verify:codex
 ```
 
 从自己的 GitHub 市场安装不需要公共目录审核，也不需要本地 MCP 合作伙伴白名单。
+
+## OpenCode 插件
+
+同一个仓库还在 [`plugins/opencode-moli`](https://github.com/27painter/dsh-moli/tree/main/plugins/opencode-moli)
+提供原生 OpenCode V2 插件。它为 OpenCode 内置的 `websearch` 工具注册免费的 `moli` 搜索提供方，
+并在 `moli` 工具命名空间下提供 `moli_fetch`、`moli_capture` 与 `moli_probe`。
+
+从仓库根目录构建自包含插件：
+
+```powershell
+npm run build:opencode
+```
+
+然后把插件目录加入 `opencode.json` 或 `opencode.jsonc`：
+
+```json
+{
+  "plugins": ["D:/dsh_plugins/dsh-moli/plugins/opencode-moli"]
+}
+```
+
+未配置 `websearch.provider` 时，插件会把 `moli` 设为默认搜索提供方。搜索质量取决于公开结果页
+（Bing → DuckDuckGo HTML → Brave），不是付费搜索 API；价值在于免费、无需密钥，并通过本地浏览器
+执行。插件选项与环境变量见插件目录的 README。
 
 ## 用法
 

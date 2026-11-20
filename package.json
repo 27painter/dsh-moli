@@ -53,7 +53,8 @@
   ],
   "scripts": {
     "build:codex": "node scripts/build-codex.mjs",
-    "verify:codex": "node verify/codex-plugin-verify.mjs"
+    "verify:codex": "node verify/codex-plugin-verify.mjs",
+    "build:opencode": "node scripts/build-opencode.mjs"
   },
   "dsh": {
     "bundle": {

@@ -6,8 +6,9 @@
 [![HOL Trust Score](https://img.shields.io/endpoint?url=https%3A%2F%2Fhol.org%2Fapi%2Fregistry%2Fbadges%2Fplugin%3Fslug%3D27painter%252Fmoli%26metric%3Dtrust%26style%3Dfor-the-badge)](https://hol.org/registry/plugins/27painter%2Fmoli)
 [![listed in Awesome Codex Plugins](https://img.shields.io/badge/Awesome_Codex_Plugins-listed-3964fe)](https://github.com/hashgraph-online/awesome-codex-plugins)
 
-**A local Moli browser bridge for DeepSeek Harness and Codex.** DSH gets two tools; the same repository
-also provides a persistent Codex MCP plugin. Both wrap [Moli](https://github.com/lexmount/moli) — a Rust
+**A local Moli browser bridge for DeepSeek Harness, Codex, and OpenCode.** DSH gets two tools; the same
+repository also provides a persistent Codex MCP plugin and a native OpenCode V2 plugin. They wrap
+[Moli](https://github.com/lexmount/moli) — a Rust
 headless browser built for AI agents — so an agent can read pages that only exist after JavaScript
 runs, search the web, and produce screenshots or PDFs.
 
@@ -291,6 +292,32 @@ npm run verify:codex
 
 Codex does not require the public plugin directory or a local-MCP partner allowlist for this
 GitHub-marketplace route.
+
+## OpenCode plugin
+
+The same repository also provides a native OpenCode V2 plugin under
+[`plugins/opencode-moli`](https://github.com/27painter/dsh-moli/tree/main/plugins/opencode-moli).
+It registers a free, keyless `moli` websearch provider for OpenCode's built-in `websearch` tool, plus
+`moli_fetch`, `moli_capture`, and `moli_probe` in the `moli` tool namespace.
+
+Build the self-contained plugin from the repository root:
+
+```powershell
+npm run build:opencode
+```
+
+Then add the plugin directory to `opencode.json` or `opencode.jsonc`:
+
+```json
+{
+  "plugins": ["D:/dsh_plugins/dsh-moli/plugins/opencode-moli"]
+}
+```
+
+When no `websearch.provider` is configured, the plugin makes `moli` the default. Search quality is
+that of public result pages (Bing → DuckDuckGo HTML → Brave), not a paid search API; the value is
+that it is free, keyless, and runs through the local browser. Plugin options and environment
+variables are documented in the plugin's README.
 
 ## Usage
 

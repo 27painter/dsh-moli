@@ -1,0 +1,39 @@
+{
+  "name": "opencode-moli",
+  "version": "2.1.1",
+  "type": "module",
+  "description": "OpenCode plugin for the local Moli headless browser: free browser-backed web search, rendered fetches, screenshots, and PDFs.",
+  "license": "MIT",
+  "author": "27painter",
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "moli",
+    "websearch",
+    "headless-browser"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/27painter/dsh-moli.git",
+    "directory": "plugins/opencode-moli"
+  },
+  "homepage": "https://github.com/27painter/dsh-moli#readme",
+  "engines": {
+    "node": ">=20.12"
+  },
+  "exports": {
+    ".": "./dist/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "dependencies": {
+    "@opencode/plugin": "2.3.2"
+  },
+  "scripts": {
+    "build": "node ../../scripts/build-opencode.mjs"
+  }
+}
