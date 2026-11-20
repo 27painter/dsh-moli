@@ -3,6 +3,8 @@
 [![npm 版本](https://img.shields.io/npm/v/dsh-moli)](https://www.npmjs.com/package/dsh-moli)
 [![license](https://img.shields.io/npm/l/dsh-moli)](LICENSE)
 [![已收录于 awesome-dsh-plugin](https://img.shields.io/badge/awesome--dsh--plugin-%E5%B7%B2%E6%94%B6%E5%BD%95-3964fe)](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)
+[![HOL 信任分](https://img.shields.io/endpoint?url=https%3A%2F%2Fhol.org%2Fapi%2Fregistry%2Fbadges%2Fplugin%3Fslug%3D27painter%252Fmoli%26metric%3Dtrust%26style%3Dfor-the-badge)](https://hol.org/registry/plugins/27painter%2Fmoli)
+[![已收录于 Awesome Codex Plugins](https://img.shields.io/badge/Awesome_Codex_Plugins-%E5%B7%B2%E6%94%B6%E5%BD%95-3964fe)](https://github.com/hashgraph-online/awesome-codex-plugins)
 
 **一个同时服务 DeepSeek Harness 与 Codex 的本地 Moli 浏览器桥。** DSH 获得两个工具；同一个仓库还提供
 常驻 Codex MCP 插件。两者都封装 [Moli](https://github.com/lexmount/moli)——一个专为 AI agent 打造的
@@ -203,7 +205,9 @@ profile 插件需要两半都齐：依赖边（`dependencies`）+ `dsh.profile.b
 ## Codex 本地 MCP 插件
 
 同一个仓库还在 [`plugins/codex-moli`](https://github.com/27painter/dsh-moli/tree/main/plugins/codex-moli) 提供 Codex 专用的本地 stdio MCP。
-它复用根目录 `lib/moli.js`，通过私人 GitHub 插件市场分发，不进入公共插件目录。
+它复用根目录 `lib/moli.js`，已收录到
+[Awesome Codex Plugins](https://github.com/hashgraph-online/awesome-codex-plugins) 与
+[HOL 插件目录](https://hol.org/registry/plugins/27painter%2Fmoli)。
 
 ```powershell
 codex plugin marketplace add 27painter/dsh-moli --ref main

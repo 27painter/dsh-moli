@@ -3,6 +3,8 @@
 [![npm version](https://img.shields.io/npm/v/dsh-moli)](https://www.npmjs.com/package/dsh-moli)
 [![license](https://img.shields.io/npm/l/dsh-moli)](LICENSE)
 [![listed in awesome-dsh-plugin](https://img.shields.io/badge/awesome--dsh--plugin-listed-3964fe)](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)
+[![HOL Trust Score](https://img.shields.io/endpoint?url=https%3A%2F%2Fhol.org%2Fapi%2Fregistry%2Fbadges%2Fplugin%3Fslug%3D27painter%252Fmoli%26metric%3Dtrust%26style%3Dfor-the-badge)](https://hol.org/registry/plugins/27painter%2Fmoli)
+[![listed in Awesome Codex Plugins](https://img.shields.io/badge/Awesome_Codex_Plugins-listed-3964fe)](https://github.com/hashgraph-online/awesome-codex-plugins)
 
 **A local Moli browser bridge for DeepSeek Harness and Codex.** DSH gets two tools; the same repository
 also provides a persistent Codex MCP plugin. Both wrap [Moli](https://github.com/lexmount/moli) — a Rust
@@ -217,7 +219,8 @@ An unresolvable bundle is **skipped silently** apart from one stderr line
 
 The same repository also exposes a Codex-only local stdio MCP plugin under
 [`plugins/codex-moli`](https://github.com/27painter/dsh-moli/tree/main/plugins/codex-moli). It uses the same `lib/moli.js` core as the DSH plugin,
-but runs as a private GitHub marketplace entry rather than a public directory submission.
+and is listed in [Awesome Codex Plugins](https://github.com/hashgraph-online/awesome-codex-plugins)
+and the [HOL plugin registry](https://hol.org/registry/plugins/27painter%2Fmoli).
 
 ```powershell
 codex plugin marketplace add 27painter/dsh-moli --ref main
