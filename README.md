@@ -2,6 +2,7 @@
 
 [![npm version](https://img.shields.io/npm/v/dsh-moli)](https://www.npmjs.com/package/dsh-moli)
 [![license](https://img.shields.io/npm/l/dsh-moli)](LICENSE)
+[![Cross-agent: DSH | Codex | OpenCode](https://img.shields.io/badge/cross--agent-DSH_%7C_Codex_%7C_OpenCode-6f42c1?style=for-the-badge)](#install)
 [![listed in awesome-dsh-plugin](https://img.shields.io/badge/awesome--dsh--plugin-listed-3964fe)](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)
 [![HOL Trust Score](https://img.shields.io/endpoint?url=https%3A%2F%2Fhol.org%2Fapi%2Fregistry%2Fbadges%2Fplugin%3Fslug%3D27painter%252Fmoli%26metric%3Dtrust%26style%3Dfor-the-badge)](https://hol.org/registry/plugins/27painter%2Fmoli)
 [![listed in Awesome Codex Plugins](https://img.shields.io/badge/Awesome_Codex_Plugins-listed-3964fe)](https://github.com/hashgraph-online/awesome-codex-plugins)

@@ -2,6 +2,7 @@
 
 [![npm 版本](https://img.shields.io/npm/v/dsh-moli)](https://www.npmjs.com/package/dsh-moli)
 [![license](https://img.shields.io/npm/l/dsh-moli)](LICENSE)
+[![跨 Agent：DSH | Codex | OpenCode](https://img.shields.io/badge/%E8%B7%A8_Agent-DSH_%7C_Codex_%7C_OpenCode-6f42c1?style=for-the-badge)](#安装)
 [![已收录于 awesome-dsh-plugin](https://img.shields.io/badge/awesome--dsh--plugin-%E5%B7%B2%E6%94%B6%E5%BD%95-3964fe)](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)
 [![HOL 信任分](https://img.shields.io/endpoint?url=https%3A%2F%2Fhol.org%2Fapi%2Fregistry%2Fbadges%2Fplugin%3Fslug%3D27painter%252Fmoli%26metric%3Dtrust%26style%3Dfor-the-badge)](https://hol.org/registry/plugins/27painter%2Fmoli)
 [![已收录于 Awesome Codex Plugins](https://img.shields.io/badge/Awesome_Codex_Plugins-%E5%B7%B2%E6%94%B6%E5%BD%95-3964fe)](https://github.com/hashgraph-online/awesome-codex-plugins)
